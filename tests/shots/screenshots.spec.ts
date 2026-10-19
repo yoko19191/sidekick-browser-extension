@@ -25,7 +25,7 @@ for (const scheme of ["light", "dark"] as const) {
     await ob.getByTestId("ob-next").click();
     await ob.getByTestId("ob-key").fill("bad-key");
     await ob.getByTestId("ob-test").click();
-    await ob.locator('[data-testid="ob-test-result"][data-state="error"]').waitFor();
+    await ob.locator('[data-testid="ob-test-result"][data-state="fail"]').waitFor();
     await shot(ob, "02-onboarding-key-error");
     await ob.close();
     const ob2 = await openPanel(context, extId, article);
@@ -90,7 +90,7 @@ for (const scheme of ["light", "dark"] as const) {
     await opt.getByTestId("nav-models").click();
     await opt.getByTestId("provider-toggle-custom").click();
     await opt.getByTestId("fetch-models").click().catch(() => {});
-    await opt.waitForTimeout(600);
+    await opt.waitForTimeout(3600); // let the toast clear
     await shot(opt, "10-settings-L3-provider-detail");
     await opt.getByTestId("nav-translation").click();
     const adv = opt.getByTestId("translation-advanced");

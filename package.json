@@ -14,7 +14,8 @@
     "build:e2e": "SIDEKICK_E2E=1 wxt build",
     "test:e2e": "npm run build:e2e && playwright test",
     "check:permissions": "node scripts/check-permissions.mjs",
-    "screenshots": "npm run build:e2e && playwright test -c playwright.shots.config.ts"
+    "screenshots": "npm run build:e2e && playwright test -c playwright.shots.config.ts",
+    "test:live": "vitest run -c vitest.live.config.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^1.3.0",

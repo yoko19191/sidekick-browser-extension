@@ -39,7 +39,11 @@ npm run compile      # tsc --noEmit
 npm test             # vitest 单元测试
 npm run test:e2e     # 构建 e2e 版本并跑 Playwright（本地 mock 模型服务，不调用任何付费 API）
 npm run check:permissions   # manifest 权限必须与 scripts/permissions.allowlist.json 一致
+npm run screenshots  # 生成亮/暗两套截图 → /workspace/deliverables/sidepanel-ext（可用 SHOTS_DIR 覆盖）
+DEEPSEEK_API_KEY=… npm run test:live   # 可选：用真实 DeepSeek 跑一次连接测试/总结/批量翻译（不在 npm test 里，未设置变量则跳过）
 ```
+
+> 测试从不调用付费 API：单元测试纯本地，e2e 全部打到 `tests/fixtures/mock-llm.mjs`（本地 OpenAI 兼容 SSE mock）。
 
 ### 手动加载
 
