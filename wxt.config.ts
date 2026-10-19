@@ -8,7 +8,7 @@ const E2E = process.env.PAGEPILOT_E2E === "1";
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   outDir: E2E ? ".output-e2e" : ".output",
-  vite: () => ({ plugins: [tailwindcss()] }),
+  vite: () => ({ plugins: [tailwindcss()], define: { __E2E__: JSON.stringify(E2E) } }),
   hooks: {
     // The content script is injected on demand (registration: "runtime"); WXT would otherwise add its
     // `matches` (<all_urls>) as a required host permission. v1 relies on activeTab + optional per-site grants.
