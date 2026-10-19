@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>How Rooftop Gardens Cool Our Cities</title>
+<style>
+  body { font: 17px/1.65 Georgia, "Times New Roman", serif; color: #222; background: #fdfcf9; margin: 0; }
+  header.site { font: 600 14px/1 system-ui, sans-serif; padding: 18px 32px; border-bottom: 1px solid #eee; letter-spacing: .04em; }
+  main { max-width: 680px; margin: 0 auto; padding: 36px 24px 80px; }
+  h1 { font-size: 34px; line-height: 1.2; margin: 0 0 10px; }
+  .byline { font: 14px system-ui, sans-serif; color: #777; margin-bottom: 28px; }
+  h2 { font-size: 22px; margin-top: 34px; }
+  pre { background: #f2f0ea; padding: 12px; border-radius: 8px; font-size: 14px; }
+  button { font: 14px system-ui, sans-serif; padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<header class="site">THE GREEN CITY JOURNAL</header>
+<main>
+  <article>
+    <h1>How Rooftop Gardens Cool Our Cities</h1>
+    <p class="byline">By Ada Fernández · 6 min read</p>
+    <p>On a hot July afternoon, the asphalt roofs of a dense city can reach temperatures above 70 °C. Rooftop gardens replace that heat-absorbing surface with soil and plants, which shade the building and cool the air through evaporation.</p>
+    <p>Researchers measured top-floor apartments under green roofs and found indoor temperatures two to four degrees lower than under conventional roofs during summer heat waves.</p>
+    <h2>Catching the rain</h2>
+    <p>A vegetated roof works like a sponge. Depending on the depth of the growing layer, it can hold back around sixty percent of the rain that falls on it, easing pressure on overloaded storm drains.</p>
+    <ul>
+      <li>Shallow sedum roofs are light and need little maintenance.</li>
+      <li>Deeper "intensive" roofs can support shrubs and even small trees.</li>
+    </ul>
+    <h2>Stepping stones for wildlife</h2>
+    <p>Bees, butterflies and birds use rooftop gardens as stepping stones between parks, turning a grey skyline into a connected habitat network.</p>
+    <pre><code>roof.temperature -= evaporation * leafArea;</code></pre>
+    <p>The upfront cost is higher than a standard roof, but energy savings and a longer membrane life usually pay it back within fifteen years.</p>
+  </article>
+  <section id="comments">
+    <button id="load-more" onclick="loadMore()">Load more</button>
+  </section>
+</main>
+<script>
+  function loadMore() {
+    const p = document.createElement("p");
+    p.id = "dynamic-para";
+    p.textContent = "This paragraph was loaded dynamically after the page finished rendering.";
+    document.getElementById("comments").appendChild(p);
+  }
+</script>
+</body>
+</html>
