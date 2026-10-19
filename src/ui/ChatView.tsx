@@ -2,8 +2,7 @@ import {
   ArrowUp, Check, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, Plus, RotateCcw, Settings2, Square, Trash2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { SafeMarkdown } from "./Markdown";
 import { ConversationStore, type Conversation } from "@/src/lib/db";
 import { DEFAULT_KEYPOINTS_TEMPLATE } from "@/src/lib/prompts";
 import { keyOptional, modelRef, resolveModelRef } from "@/src/lib/providers";
@@ -414,7 +413,7 @@ function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; on
     <div className="animate-in" data-testid="assistant-message" data-status={m.status}>
       {m.status === "error" ? (
         <div className="rounded-card bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
-          {m.content && <div className="md mb-2 opacity-80"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>}
+          {m.content && <div className="md mb-2 opacity-80"><SafeMarkdown>{m.content}</SafeMarkdown></div>}
           <div className="flex items-center gap-2"><span className="flex-1" data-testid="assistant-error">{m.error}</span><Button size="sm" variant="ghost" icon={RotateCcw} onClick={onRetry}>重试</Button></div>
         </div>
       ) : !m.content ? (
@@ -424,7 +423,7 @@ function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; on
         </div>
       ) : (
         <div ref={ref} onClick={onClick} className={cn("md", m.status === "streaming" && "caret")} data-testid="assistant-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _n, ...props }) => (props.href?.startsWith("#") ? <a {...props} /> : <a {...props} target="_blank" rel="noreferrer" />) }}>{m.content}</ReactMarkdown>
+          <SafeMarkdown>{m.content}</SafeMarkdown>
         </div>
       )}
       {m.status === "done" && (

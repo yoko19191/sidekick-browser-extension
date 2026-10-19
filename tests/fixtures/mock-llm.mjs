@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 
 const FIXTURE_DIR = new URL("./", import.meta.url);
-export const stats = { translateRequests: 0, translatedItems: 0, chatRequests: 0, sectionRequests: 0, selectionRequests: 0, toolRequests: 0, authHeaders: new Set() };
+export const stats = { translateRequests: 0, translatedItems: 0, chatRequests: 0, sectionRequests: 0, selectionRequests: 0, toolRequests: 0, pixelHits: 0, authHeaders: new Set() };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const SUMMARY = `**TL;DR**：这篇文章介绍了城市屋顶花园如何降低室温、吸收雨水并改善生物多样性。
@@ -72,6 +72,12 @@ export function startMock(port = 0) {
         return res.writeHead(404).end();
       }
     }
+    if (url.pathname === "/__pixel") {
+      // exfiltration canary: model output embeds this as an image; it must never be fetched automatically
+      stats.pixelHits++;
+      res.writeHead(200, { "Content-Type": "image/gif", "Access-Control-Allow-Origin": "*" });
+      return res.end(Buffer.from("R0lGODlhAQABAAAAACw=", "base64"));
+    }
     if (url.pathname === "/__stats") {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ...stats, authHeaders: [...stats.authHeaders] }));
@@ -136,6 +142,12 @@ export function startMock(port = 0) {
           await sleep(1000);
         }
         out.chunk(model, "END-OF-SLOW-STREAM");
+        return out.end(model);
+      }
+      if (/INJECT-IMAGE/.test(lastText)) {
+        // simulates a prompt-injected model trying to exfiltrate via an auto-loading image (+ raw HTML)
+        const host = `http://${req.headers.host}`;
+        out.chunk(model, `Sure. ![status](${host}/__pixel?d=secret-from-page) and <img src="${host}/__pixel?d=html"> done.`);
         return out.end(model);
       }
       if (/Reply with: ok/.test(lastText)) {

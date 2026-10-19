@@ -130,6 +130,21 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await page.close();
   });
 
+  test("model output cannot auto-load remote resources (image exfiltration canary)", async () => {
+    const page = await openArticle();
+    const panel = await openPanel(article);
+    await panel.getByTestId("composer").fill("INJECT-IMAGE please");
+    await panel.getByTestId("send").click();
+    const msg = panel.getByTestId("assistant-message").last();
+    await expect(msg).toHaveAttribute("data-status", "done");
+    await expect(msg.locator("img")).toHaveCount(0);
+    await expect(msg.getByTestId("md-image-link")).toHaveText("🖼 status");
+    await panel.waitForTimeout(500);
+    expect((await stats()).pixelHits).toBe(0);
+    await panel.close();
+    await page.close();
+  });
+
   test("long article (>20k chars) is summarized section by section then merged", async () => {
     const url = `${base}/fixtures/long.html`;
     const page = await openArticle("long.html");

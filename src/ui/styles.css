@@ -109,3 +109,4 @@ body {
 .md section[data-footnotes] ol { @apply my-0; }
 .md section[data-footnotes] li { @apply cursor-pointer rounded-[6px] hover:text-foreground; }
 .md section[data-footnotes] a[data-footnote-backref] { display: none; }
+.md .md-img-link { @apply inline-flex items-center gap-1 rounded-[6px] bg-muted px-1.5 py-0.5 text-[12px] text-muted-foreground no-underline; }
