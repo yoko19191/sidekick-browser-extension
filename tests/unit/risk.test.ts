@@ -20,6 +20,9 @@ describe("risk classify", () => {
     expect(classify({ name: "scroll", args: {} }, undefined, { ...ctx, currentUrl: "https://www.paypal.com/" }).level).toBe(3);
     expect(classify({ name: "scroll", args: {} }, undefined, { ...ctx, currentUrl: "chrome://settings" }).level).toBe(3);
   });
+  it("a link to a never-list site is R3 like navigate", () => {
+    expect(classify({ name: "click", args: { index: "1" } }, { index: "1", tag: "a", text: "pay", href: "https://www.paypal.com/x" }, ctx).level).toBe(3);
+  });
   it("allow-kind downgrades R2 but never R3", () => {
     const v = classify({ name: "click", args: { index: "1" } }, { index: "1", tag: "button", text: "x", isSubmit: true }, ctx);
     expect(effectiveLevel(v, new Set(["submit"]))).toBe(1);

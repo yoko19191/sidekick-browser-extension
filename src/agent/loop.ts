@@ -31,6 +31,11 @@ export type RunOutcome =
   | { status: "done"; success: boolean; text: string; steps: number }
   | { status: "stopped" | "budget" | "error"; steps: number; error?: string };
 
+/** Neutralise anything in page text that could close or forge our wrapper tags. */
+export function escapePageText(t: string): string {
+  return t.replace(/</g, "‹").replace(/>/g, "›");
+}
+
 function isStateMessage(m: AgentMessage): boolean {
   if ((m as any).role !== "user") return false;
   const c = (m as any).content;
@@ -63,10 +68,10 @@ export class WebAgent {
         this.stepUrl = snap.url;
         const kept = messages.filter((m) => !isStateMessage(m));
         const state = `${STATE_MARKER} step="${this.steps + 1}" max_steps="${this.maxSteps}">
-url: ${snap.url}
-title: ${snap.title}
+url: ${escapePageText(snap.url)}
+title: ${escapePageText(snap.title)}
 <untrusted_page_content>
-${snap.tree}
+${escapePageText(snap.tree)}
 </untrusted_page_content>
 </browser_state>`;
         return [...kept, { role: "user", content: [{ type: "text", text: state }], timestamp: Date.now() } as AgentMessage];
@@ -88,6 +93,7 @@ ${snap.tree}
 
         const a = args as Record<string, unknown>;
         const target = typeof a.index === "string" ? await driver.describe(a.index) : undefined;
+        if (typeof a.index === "string" && !target) return block(`element ${a.index} not found; the page may have changed, observe again`);
         const verdict = classify({ name, args: a }, target, {
           currentUrl: await driver.currentUrl(),
           startSite: this.startSite,

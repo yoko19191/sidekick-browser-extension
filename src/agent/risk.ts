@@ -80,6 +80,7 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
       return { level: 1, reason: "key press" };
     }
     case "click": {
+      if (target?.href && isForbiddenUrl(target.href, never)) return { level: 3, reason: "link leads to a site on the never-act list" };
       if (target?.isSubmit) return { level: 2, reason: "submits a form", kind: "submit" };
       const label = `${target?.text ?? ""} ${target?.role ?? ""}`;
       if (CONSEQUENTIAL.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" may have consequences`, kind: "consequential" };
