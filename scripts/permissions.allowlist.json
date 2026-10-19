@@ -1,6 +1,16 @@
 {
-  "permissions": ["activeTab", "contextMenus", "scripting", "sidePanel", "storage"],
-  "optional_permissions": [],
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "scripting",
+    "sidePanel",
+    "storage"
+  ],
+  "optional_permissions": [
+    "userScripts"
+  ],
   "host_permissions": [],
-  "optional_host_permissions": ["<all_urls>"]
+  "optional_host_permissions": [
+    "<all_urls>"
+  ]
 }
