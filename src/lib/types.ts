@@ -69,7 +69,7 @@ export type PortRequest =
       id: string;
       task: "chat" | "summary";
       messages: ChatTurn[];
-      page?: { title: string; url: string; markdown: string; lang?: string };
+      page?: { title: string; url: string; markdown: string; lang?: string; length?: number };
     }
   | { type: "abort"; id: string }
   | { type: "ping" };
@@ -79,6 +79,7 @@ export type PortEvent =
   | { type: "delta"; id: string; text: string }
   | { type: "thinking"; id: string }
   | { type: "progress"; id: string; done: number; total: number }
+  | { type: "coverage"; id: string; percent: number }
   | { type: "done"; id: string; stopReason?: string }
   | { type: "error"; id: string; message: string }
   | { type: "pong"; bootId: string };

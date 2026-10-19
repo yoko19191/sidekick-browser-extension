@@ -1,5 +1,5 @@
 import {
-  ArrowUp, Check, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, Plus, RotateCcw, Settings2, Square, Trash2, X,
+  ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, Plus, RotateCcw, Settings2, Square, Trash2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SafeMarkdown } from "./Markdown";
@@ -20,6 +20,7 @@ interface Msg extends ChatTurn {
   model?: string;
   error?: string;
   progress?: { done: number; total: number };
+  coverage?: number; // % of a very long page that the summary covers (only set when truncated)
 }
 
 const store = new ConversationStore();
@@ -108,9 +109,10 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     const page = kind === "summary" || usePage ? await getPage() : undefined;
     const patch = (f: (x: Msg) => Msg) => setMessages((m) => m.map((x) => (x.id === asst.id ? f(x) : x)));
     if (kind === "summary" && !page) return patch((x) => ({ ...x, status: "error", error: "无法读取当前页面内容" }));
-    const h = llm.chat({ task: kind ?? "chat", messages: history, page: page && { title: page.title, url: page.url, markdown: page.markdown } }, (e) => {
+    const h = llm.chat({ task: kind ?? "chat", messages: history, page: page && { title: page.title, url: page.url, markdown: page.markdown, length: page.length } }, (e) => {
       if (e.type === "start") patch((x) => ({ ...x, model: e.model }));
       if (e.type === "progress") patch((x) => ({ ...x, progress: { done: e.done, total: e.total } }));
+      if (e.type === "coverage") patch((x) => ({ ...x, coverage: e.percent }));
       if (e.type === "thinking") patch((x) => ({ ...x, status: x.content ? x.status : "thinking" }));
       if (e.type === "delta") patch((x) => ({ ...x, status: "streaming", content: x.content + e.text }));
       if (e.type === "done") {
@@ -424,6 +426,12 @@ function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; on
       ) : (
         <div ref={ref} onClick={onClick} className={cn("md", m.status === "streaming" && "caret")} data-testid="assistant-content">
           <SafeMarkdown>{m.content}</SafeMarkdown>
+        </div>
+      )}
+      {m.coverage != null && (
+        <div data-testid="coverage-notice" className="mt-2 flex items-center gap-1.5 rounded-[10px] bg-muted px-2.5 py-1.5 text-[12px] text-muted-foreground">
+          <Info className="size-3.5 shrink-0" />
+          {m.kind === "summary" ? `页面过长，仅总结了前 ${m.coverage}%` : `页面过长，仅参考了前 ${m.coverage}%`}
         </div>
       )}
       {m.status === "done" && (

@@ -1,8 +1,8 @@
 import { TranslationCache } from "@/src/lib/cache";
 import { buildTranslatePrompt, parseTranslationResponse } from "@/src/lib/batch";
-import { translationCacheKey } from "@/src/lib/hash";
+import { promptVariant, translationCacheKey } from "@/src/lib/hash";
 import { listModels, streamText, testConnection } from "@/src/lib/llm";
-import { chunkMarkdown, LONG_PAGE_CHARS, pageSystemPrompt, sectionPrompt, summaryInstruction } from "@/src/lib/prompts";
+import { LONG_PAGE_CHARS, pageSystemPrompt, planLongSummary, sectionPrompt, summaryInstruction } from "@/src/lib/prompts";
 import { friendlyError, getKey, keyOptional, loadProviders, redactSecrets, resolveModelRef } from "@/src/lib/providers";
 import { langName, loadSettings } from "@/src/lib/settings";
 import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib/types";
@@ -107,7 +107,8 @@ export default defineBackground({
       const { provider, modelId, apiKey } = await resolveTask(s.models.translate);
       cache.maxEntries = s.cache.maxEntries;
       const modelTag = `${provider.presetId}:${modelId}`;
-      const variant = t.extraPrompt.trim() ? t.extraPrompt.trim().slice(0, 64) : "";
+      // Cache variant = hash of the FULL extra prompt (two prompts sharing a 64-char prefix must not share entries).
+      const variant = await promptVariant(t.extraPrompt);
       const keys = await Promise.all(texts.map((x) => translationCacheKey(x, t.targetLang, modelTag, variant)));
       const cached = t.cacheEnabled ? await cache.getMany(keys) : texts.map(() => undefined);
       const missIdx = cached.map((c, i) => (c === undefined ? i : -1)).filter((i) => i >= 0);
@@ -156,6 +157,19 @@ export default defineBackground({
       );
       const storing = pending ? chrome.storage.session.set({ pendingAction: { ...pending, tabId, at: Date.now() } }) : Promise.resolve();
       return Promise.all([opening, storing]).then(([r]) => r);
+    }
+
+    /**
+     * Which provider config + key a test/list request may use. A stored key is only ever paired with the STORED
+     * config (baseUrl etc.), never with a baseUrl from the message — otherwise a message could redirect the saved key
+     * to another host. A key typed in the request (onboarding / editing) goes with the config sent alongside it.
+     */
+    async function providerForRequest(msg: { provider?: ProviderConfig; apiKey?: string }): Promise<{ provider: ProviderConfig; key?: string }> {
+      if (!msg.provider?.id) throw new Error("缺少服务商配置");
+      if (msg.apiKey) return { provider: msg.provider, key: msg.apiKey };
+      const stored = (await loadProviders()).find((p) => p.id === msg.provider!.id);
+      if (stored) return { provider: stored, key: await getKey(stored.id) };
+      return { provider: msg.provider, key: undefined }; // unsaved and keyless (e.g. Ollama during onboarding): nothing secret involved
     }
 
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -212,16 +226,19 @@ export default defineBackground({
         case "provider:test":
           return reply(
             (async () => {
-              const key = (msg.apiKey as string | undefined) ?? (await getKey(msg.provider.id));
+              const { provider, key } = await providerForRequest(msg);
               try {
-                return await testConnection(msg.provider, msg.modelId, key);
+                return await testConnection(provider, msg.modelId, key);
               } catch (e) {
                 throw new Error(friendlyError(redactSecrets((e as Error).message, [key])));
               }
             })(),
           );
         case "provider:models":
-          return reply((async () => listModels(msg.provider, (msg.apiKey as string | undefined) ?? (await getKey(msg.provider.id))))());
+          return reply((async () => {
+            const { provider, key } = await providerForRequest(msg);
+            return listModels(provider, key);
+          })());
         case "cache:stats":
           return reply(cache.count());
         case "cache:clear":
@@ -278,7 +295,9 @@ export default defineBackground({
           // Long pages (>20k chars): summarize section by section, then merge (map-reduce).
           let sectionNotes: string | undefined;
           if (req.task === "summary" && req.page && req.page.markdown.length > LONG_PAGE_CHARS) {
-            const chunks = chunkMarkdown(req.page.markdown, 12000).slice(0, 16);
+            const plan = planLongSummary(req.page.markdown, { fullLength: req.page.length });
+            const chunks = plan.chunks;
+            if (plan.truncated) send({ type: "coverage", id: req.id, percent: plan.percent });
             const notes: string[] = [];
             for (let i = 0; i < chunks.length; i++) {
               send({ type: "progress", id: req.id, done: i, total: chunks.length });
@@ -287,6 +306,11 @@ export default defineBackground({
             }
             send({ type: "progress", id: req.id, done: chunks.length, total: chunks.length });
             sectionNotes = notes.join("\n\n");
+          } else if (req.page) {
+            // single-pass prompt: pageSystemPrompt keeps only the first maxContextChars characters
+            const full = Math.max(req.page.length ?? 0, req.page.markdown.length);
+            const used = Math.min(req.page.markdown.length, s.summary.maxContextChars);
+            if (full > used) send({ type: "coverage", id: req.id, percent: Math.max(1, Math.min(99, Math.floor((used / full) * 100))) });
           }
           let thinkingSent = false;
           const res = await streamText(

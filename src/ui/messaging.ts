@@ -59,7 +59,7 @@ class LlmClient {
     }
   }
 
-  chat(req: { task: "chat" | "summary"; messages: ChatTurn[]; page?: { title: string; url: string; markdown: string } }, onEvent: Handler) {
+  chat(req: { task: "chat" | "summary"; messages: ChatTurn[]; page?: { title: string; url: string; markdown: string; length?: number } }, onEvent: Handler) {
     const id = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     this.handlers.set(id, onEvent);
     this.post({ type: "chat", id, ...req });

@@ -22,8 +22,8 @@ const SUMMARY = `**TL;DR**：这篇文章介绍了城市屋顶花园如何降低
 
 [^1]: it can hold back around sixty percent of the rain that falls on it`;
 
-function longArticle() {
-  const paras = Array.from({ length: 70 }, (_, i) => `<h2>Chapter ${i + 1}</h2><p>${`Section ${i + 1} discusses urban heat, rainfall retention and pollinators in considerable detail. `.repeat(5)}</p>`).join("\n");
+function longArticle(chapters = 70) {
+  const paras = Array.from({ length: chapters }, (_, i) => `<h2>Chapter ${i + 1}</h2><p>${`Section ${i + 1} discusses urban heat, rainfall retention and pollinators in considerable detail. `.repeat(5)}</p>`).join("\n");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A Very Long Report on Green Roofs</title></head><body><article><h1>A Very Long Report on Green Roofs</h1>${paras}</article></body></html>`;
 }
 
@@ -61,7 +61,7 @@ export function startMock(port = 0) {
     const url = new URL(req.url, "http://x");
     if (url.pathname === "/fixtures/long.html") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      return res.end(longArticle());
+      return res.end(longArticle(Math.min(2000, Number(url.searchParams.get("chapters")) || 70)));
     }
     if (url.pathname.startsWith("/fixtures/")) {
       try {

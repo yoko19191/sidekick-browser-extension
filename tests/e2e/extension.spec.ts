@@ -104,6 +104,13 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await opt.getByTestId("provider-toggle-custom").click();
     await expect(opt.getByTestId("base-url")).toHaveValue(`${base}/v1`);
     await expect(opt.getByTestId("provider-summary")).toContainText("••••-123"); // masked, never the full key
+    // a test request carrying a forged baseUrl but no key must use the STORED config (the saved key never goes elsewhere)
+    const forged = await opt.evaluate(async () => {
+      const { providers } = await chrome.storage.local.get("providers");
+      const p = (providers as { presetId: string; baseUrl: string }[]).find((x) => x.presetId === "custom")!;
+      return chrome.runtime.sendMessage({ type: "provider:test", provider: { ...p, baseUrl: "http://127.0.0.1:9/v1" }, modelId: "mock-fast" });
+    });
+    expect(forged.ok).toBe(true);
     await opt.close();
   });
 
@@ -155,6 +162,20 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await expect(msg).toHaveAttribute("data-status", "done", { timeout: 30_000 });
     await expect(msg).toContainText("长文总结");
     expect((await stats()).sectionRequests - before).toBeGreaterThanOrEqual(2);
+    await panel.close();
+    await page.close();
+  });
+
+  test("very long page: summary is capped at 16 sections and says how much it covered", async () => {
+    const url = `${base}/fixtures/long.html?chapters=600`;
+    const page = await openArticle("long.html?chapters=600");
+    const panel = await openPanel(url);
+    const before = (await stats()).sectionRequests;
+    await panel.getByTestId("action-summarize").click();
+    const msg = panel.getByTestId("assistant-message").last();
+    await expect(msg).toHaveAttribute("data-status", "done", { timeout: 60_000 });
+    expect((await stats()).sectionRequests - before).toBe(16);
+    await expect(msg.getByTestId("coverage-notice")).toHaveText(/页面过长，仅总结了前 \d{1,2}%/);
     await panel.close();
     await page.close();
   });
