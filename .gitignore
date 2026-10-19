@@ -7,3 +7,4 @@ playwright-report
 *.log
 .env*
 .output-e2e
+.output-e2e-nohost

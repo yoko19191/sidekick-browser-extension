@@ -55,7 +55,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     if (!tab) return;
     setTstate(null);
     setPageError(null);
-    if (!restricted(tab.url)) bg<TranslateState>({ type: "translate:status", tabId: tab.id }).then(setTstate).catch(() => {});
+    if (!tab.url || !restricted(tab.url)) bg<TranslateState>({ type: "translate:status", tabId: tab.id }).then(setTstate).catch(() => {});
     const onMsg = (msg: { type?: string; state?: TranslateState }, sender: chrome.runtime.MessageSender) => {
       if (msg?.type === "translate:state" && sender.tab?.id === tab.id) setTstate(msg.state!);
     };
@@ -78,7 +78,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   }, [messages, conv.id]);
 
   async function getPage(): Promise<PageContent | undefined> {
-    if (!tab || restricted(tab.url)) return undefined;
+    if (!tab || (tab.url && restricted(tab.url))) return undefined; // url "" = hidden (no access yet), still worth trying
     const k = `${tab.id}|${tab.url}`;
     if (pageCache.current.has(k)) return pageCache.current.get(k);
     try {
@@ -93,7 +93,8 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   }
 
   async function grantSite() {
-    if (!tab) return;
+    // Without host access Chrome hides tab.url, so an origin-specific request is only possible when we know it.
+    if (!tab || !/^https?:|^file:/.test(tab.url)) return;
     const ok = await chrome.permissions.request({ origins: [`${new URL(tab.url).origin}/*`] }).catch(() => false);
     if (ok) setPageError(null);
   }
@@ -168,6 +169,10 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   }
 
   const host = tab && !restricted(tab.url) ? new URL(tab.url).host : "";
+  // Without host access (or after an activeTab grant expired) Chrome hides tab.url: the page is still usable once
+  // granted, so actions stay enabled and fail into the "grant" strip instead of looking like a browser-internal page.
+  const urlHidden = !!tab && !tab.url;
+  const pageOk = !!host || urlHidden;
   const needsGrant = !!pageError && /permission|Cannot access|must request/i.test(pageError);
   const translating = !!tstate?.active;
   const allModels = providers.filter((p) => p.enabled && usable(p)).map((p) => ({ p, models: p.models }));
@@ -202,24 +207,24 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
           </DropdownContent>
         </Dropdown>
         <div className="flex-1" />
-        <IconButton icon={Languages} label={translating ? "显示原文" : "翻译本页"} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!host} />
+        <IconButton icon={Languages} label={translating ? "显示原文" : "翻译本页"} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!pageOk} />
         <IconButton icon={Plus} label="新对话" onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
         <IconButton icon={History} label="历史会话" onClick={() => setHistoryOpen(true)} testId="open-history" />
         <QuickSettings settings={settings} update={update} tab={tab} host={host} />
       </header>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {host && (
+        {pageOk && (
           <div className="mt-1 flex items-center gap-2.5 rounded-card bg-card px-3 py-2.5" data-testid="page-chip">
             {tab?.favIconUrl ? <img src={tab.favIconUrl} className="size-4 rounded-[4px]" alt="" /> : <Globe className="size-4 text-muted-foreground" />}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium">{tab?.title || host}</div>
-              <div className="truncate text-[12px] text-muted-foreground">{host}</div>
+              <div className="truncate text-[13px] font-medium">{tab?.title || host || "当前页面"}</div>
+              <div className="truncate text-[12px] text-muted-foreground">{host || "尚未获得此页的访问权限"}</div>
             </div>
           </div>
         )}
         {messages.length === 0 ? (
-          <EmptyState host={host} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
+          <EmptyState host={host} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
             onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
         ) : (
           <div className="space-y-5 pt-4">
@@ -237,10 +242,12 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
           </div>
         )}
         {pageError && (
-          <div className="flex animate-in items-center gap-2 rounded-card bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">
+          <div data-testid="page-error" data-needs-grant={needsGrant ? "" : undefined} className="flex animate-in items-center gap-2 rounded-card bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">
             <Lock className="size-4 shrink-0" />
-            <span className="min-w-0 flex-1">{needsGrant ? `需要访问 ${host} 的权限才能读取或翻译此页` : pageError}</span>
-            {needsGrant && <Button size="sm" variant="outline" onClick={grantSite}>允许</Button>}
+            <span className="min-w-0 flex-1">
+              {!needsGrant ? pageError : host ? `需要访问 ${host} 的权限才能读取或翻译此页` : "需要此页的访问权限：点一下工具栏的翻翻图标即可授权本页"}
+            </span>
+            {needsGrant && host && <Button size="sm" variant="outline" onClick={grantSite} testId="grant-site">允许</Button>}
             <button onClick={() => setPageError(null)} className="opacity-60 hover:opacity-100" aria-label="关闭"><X className="size-4" /></button>
           </div>
         )}
@@ -278,11 +285,11 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
             className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3.5 pt-3 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
           />
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-            <button type="button" onClick={() => setUsePage((v) => !v)} disabled={!host} data-testid="use-page" data-on={usePage && host ? "" : undefined}
-              className={cn("flex h-7 items-center gap-1.5 rounded-btn px-2.5 text-[12px] font-medium transition", usePage && host ? "bg-background text-foreground" : "text-muted-foreground hover:bg-muted")}>
+            <button type="button" onClick={() => setUsePage((v) => !v)} disabled={!pageOk} data-testid="use-page" data-on={usePage && pageOk ? "" : undefined}
+              className={cn("flex h-7 items-center gap-1.5 rounded-btn px-2.5 text-[12px] font-medium transition", usePage && pageOk ? "bg-background text-foreground" : "text-muted-foreground hover:bg-muted")}>
               <FileText className="size-3.5" />
               引用本页
-              {usePage && host && <Check className="size-3.5 text-primary" strokeWidth={2.6} />}
+              {usePage && pageOk && <Check className="size-3.5 text-primary" strokeWidth={2.6} />}
             </button>
             <div className="flex-1" />
             {busy ? (
@@ -358,7 +365,7 @@ function QuickSettings({ settings, update, tab, host }: { settings: Settings; up
   );
 }
 
-function EmptyState(p: { host: string; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onKeyPoints: () => void }) {
+function EmptyState(p: { host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onKeyPoints: () => void }) {
   const chips = [
     { icon: FileText, label: "总结本页", onClick: p.onSummarize, testId: "action-summarize" },
     { icon: Languages, label: p.translating ? "显示原文" : "翻译本页", onClick: p.onTranslate, testId: "action-translate" },
@@ -368,9 +375,9 @@ function EmptyState(p: { host: string; translating: boolean; targetLang: string;
     <div className="animate-in pt-10">
       <div className="px-1">
         <div className="text-[22px] font-semibold tracking-tight">有什么可以帮你？</div>
-        <div className="mt-1.5 text-[13.5px] leading-6 text-muted-foreground">{p.host ? `可以总结、翻译（译为${p.targetLang}），或围绕这个页面提问。` : "浏览器内部页面无法读取，你仍可以直接提问。"}</div>
+        <div className="mt-1.5 text-[13.5px] leading-6 text-muted-foreground">{p.pageOk ? `可以总结、翻译（译为${p.targetLang}），或围绕这个页面提问。` : "浏览器内部页面无法读取，你仍可以直接提问。"}</div>
       </div>
-      {p.host && (
+      {p.pageOk && (
         <div className="mt-5 flex flex-wrap gap-2">
           {chips.map((c) => (
             <button key={c.label} data-testid={c.testId} onClick={c.onClick}
