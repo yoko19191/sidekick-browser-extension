@@ -43,3 +43,11 @@ describe("insert / restore", () => {
     expect(body.innerHTML).toBe(before);
   });
 });
+
+describe("translation tone", () => {
+  it("picks the bright accent for light text (dark pages) and the darker one otherwise", () => {
+    document.body.innerHTML = `<p id="a" style="color:#111">Hello</p><p id="b" style="color:rgb(240,240,240)">Hi</p>`;
+    expect(insertTranslation(document.getElementById("a")!, "你好", { lang: "zh-CN", style: "green" }).getAttribute("data-pp-tone")).toBe("light");
+    expect(insertTranslation(document.getElementById("b")!, "嗨", { lang: "zh-CN", style: "green" }).getAttribute("data-pp-tone")).toBe("dark");
+  });
+});

@@ -307,7 +307,7 @@ function TranslationSection({ settings, update }: Ctx) {
 }
 
 function StylePreview({ style }: { style: TranslationStyle }) {
-  const inner: Record<TranslationStyle, string> = { plain: "", dashed: "border-b-[1.5px] border-dashed border-primary", faded: "opacity-60", highlight: "bg-[linear-gradient(transparent_55%,rgba(253,224,71,.6)_55%)]", card: "" };
+  const inner: Record<TranslationStyle, string> = { green: "text-[#16a34a] dark:text-[#34d399]", plain: "", dashed: "border-b-[1.5px] border-dashed border-primary", faded: "opacity-60", highlight: "bg-[linear-gradient(transparent_55%,rgba(253,224,71,.6)_55%)]", card: "" };
   return (
     <div className={cn("mt-0.5 text-[12.5px] leading-5", style === "card" && "rounded-[6px] border-l-2 border-primary bg-primary-soft px-1.5")}>
       <span className={inner[style]}>敏捷的棕色狐狸。</span>

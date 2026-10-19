@@ -187,12 +187,27 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await panel.getByTestId("translate-toggle").click();
     await expect.poll(() => page.locator(".pp-trans").count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(9);
     const h1 = page.locator("h1");
-    await expect(h1.locator(".pp-trans")).toHaveText("【译】How Rooftop Gardens Cool Our Cities");
+    await expect(h1.locator(".pp-trans")).toHaveText("屋顶花园如何为城市降温");
+    // default style: green text directly under the original, same font size, no underline / prefix
+    const firstP = page.locator("article p", { hasText: "On a hot July afternoon" });
+    const look = await firstP.evaluate((p) => {
+      const t = p.querySelector(".pp-trans") as HTMLElement;
+      const inner = t.querySelector(".pp-trans-inner") as HTMLElement;
+      const cs = getComputedStyle(t);
+      return { cls: t.className, color: cs.color, display: cs.display, fs: cs.fontSize, pfs: getComputedStyle(p).fontSize, border: getComputedStyle(inner).borderBottomStyle, last: p.lastElementChild === t, text: t.textContent };
+    });
+    expect(look.cls).toContain("pp-style-green");
+    expect(look.color).toBe("rgb(22, 163, 74)"); // #16a34a on the light fixture page
+    expect(look.display).toBe("block");
+    expect(look.fs).toBe(look.pfs);
+    expect(look.border).toBe("none");
+    expect(look.last).toBe(true);
+    expect(look.text).toMatch(/^在炎热的七月午后/);
     await expect(h1).toContainText("How Rooftop Gardens Cool Our Cities");
     await expect(page.locator("pre .pp-trans")).toHaveCount(0);
     await expect(panel.getByTestId("translate-status")).toContainText("已译为");
     await page.click("#load-more");
-    await expect(page.locator("#dynamic-para .pp-trans")).toHaveText(/【译】This paragraph was loaded dynamically/, { timeout: 10_000 });
+    await expect(page.locator("#dynamic-para .pp-trans")).toHaveText("这一段是在页面渲染完成后动态加载的。", { timeout: 10_000 });
     expect((await stats()).translateRequests).toBeGreaterThan(before);
 
     // translation-only mode from the gear popover applies live
@@ -236,7 +251,7 @@ test.describe.serial("翻翻 Sidekick v1", () => {
       p.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: b.right, clientY: b.bottom }));
     });
     await ui.getByTestId("pp-selection-dot").click();
-    await expect(ui.locator(".card .out[data-done]")).toContainText("【划词】A vegetated roof works like a sponge");
+    await expect(ui.locator(".card .out[data-done]")).toContainText("植被屋顶就像一块海绵");
     await ui.locator(".card .ask").click();
     await expect(panel.getByTestId("composer")).toHaveValue(/A vegetated roof works like a sponge/, { timeout: 5000 });
     // floating button toggles translation

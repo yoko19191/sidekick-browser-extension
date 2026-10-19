@@ -80,6 +80,7 @@ export function parseTranslationResponse(reply: string, expected: number): strin
 }
 
 export const STYLE_LABELS: Record<TranslationStyle, string> = {
+  green: "绿色译文",
   plain: "简洁",
   dashed: "虚线下划线",
   faded: "柔和淡化",

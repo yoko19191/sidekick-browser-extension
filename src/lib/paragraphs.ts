@@ -67,6 +67,22 @@ export function collectParagraphs(root: Element, opts: CollectOptions = {}): Par
   return out;
 }
 
+/**
+ * "dark" when the original text is light-coloured (i.e. it sits on a dark background), so the translation can pick a
+ * brighter accent there. Uses the element's own text colour rather than guessing the page background.
+ */
+export function textTone(el: Element): "light" | "dark" {
+  const view = el.ownerDocument.defaultView;
+  const c = view?.getComputedStyle(el).color ?? "";
+  const m = c.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+  if (!m) return "light";
+  const [r, g, b] = [m[1], m[2], m[3]].map((v) => {
+    const x = Number(v) / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? "dark" : "light";
+}
+
 export function insertTranslation(el: Element, translation: string, opts: { lang: string; style: string }): HTMLElement {
   const doc = el.ownerDocument;
   el.querySelectorAll(":scope > .pp-trans").forEach((n) => n.remove());
@@ -75,6 +91,7 @@ export function insertTranslation(el: Element, translation: string, opts: { lang
   wrap.setAttribute("data-pp-ui", "");
   wrap.setAttribute("lang", opts.lang);
   wrap.setAttribute("translate", "no");
+  wrap.setAttribute("data-pp-tone", textTone(el));
   const inner = doc.createElement("span");
   inner.className = "pp-trans-inner";
   inner.textContent = translation;
@@ -106,6 +123,9 @@ export const TRANSLATION_CSS = `
 .pp-trans{display:block;margin:.35em 0 .1em;line-height:1.6;font-size:inherit;}
 li>.pp-trans,td>.pp-trans,th>.pp-trans,dt>.pp-trans,dd>.pp-trans{margin-top:.2em}
 h1>.pp-trans,h2>.pp-trans,h3>.pp-trans,h4>.pp-trans,h5>.pp-trans,h6>.pp-trans{font-weight:inherit;}
+.pp-style-green{color:#16a34a;margin-top:.25em}
+.pp-style-green[data-pp-tone=dark]{color:#34d399}
+html.pp-only .pp-style-green{color:inherit}
 .pp-style-plain .pp-trans-inner{}
 .pp-style-dashed .pp-trans-inner{border-bottom:1.5px dashed rgba(99,102,241,.75);padding-bottom:1px}
 .pp-style-faded .pp-trans-inner{opacity:.72}

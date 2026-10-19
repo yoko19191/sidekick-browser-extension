@@ -15,7 +15,7 @@ export interface ProviderConfig {
 /** "auto" = first enabled provider that has a key, using its first model. */
 export type ModelRef = "auto" | `${string}::${string}`;
 
-export type TranslationStyle = "plain" | "dashed" | "faded" | "highlight" | "card";
+export type TranslationStyle = "green" | "plain" | "dashed" | "faded" | "highlight" | "card";
 export type SummaryLength = "short" | "medium" | "detailed";
 export type ThemeMode = "system" | "light" | "dark";
 export type DisplayMode = "bilingual" | "translation-only";

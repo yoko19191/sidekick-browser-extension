@@ -19,7 +19,7 @@ export function defaultSettings(uiLang?: string): Settings {
     models: { chat: "auto", summary: "auto", translate: "auto" },
     translation: {
       targetLang: defaultTargetLang(uiLang),
-      style: "dashed",
+      style: "green",
       batchMaxChars: 1800,
       batchMaxItems: 16,
       concurrency: 3,

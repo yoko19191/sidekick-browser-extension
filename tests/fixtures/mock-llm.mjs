@@ -1,6 +1,6 @@
 // Local OpenAI-compatible mock (no network, no paid API). Streams SSE like /v1/chat/completions.
 //   model "mock-slow": first chunk, then ~32s of silence ("thinking"), then 13 chunks 1s apart (≈45s total)
-//   translation requests (system prompt contains "professional translator"): returns ["【译】…", …]
+//   translation requests (system prompt contains "professional translator"): returns realistic Chinese (see ZH / mockTranslate)
 //   anything else: a Markdown summary streamed in small chunks
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -21,6 +21,38 @@ const SUMMARY = `**TL;DR**：这篇文章介绍了城市屋顶花园如何降低
 城市热岛效应正在加剧，屋顶花园是少数能**同时**解决温度、排水与生态问题的低技术方案。[^1]
 
 [^1]: it can hold back around sixty percent of the rain that falls on it`;
+
+
+// Realistic (hand-written) translations for the fixture article, so screenshots look like real output.
+// Unknown text gets a deterministic Chinese placeholder of similar length. No prefixes/markers.
+const ZH = {
+  "THE GREEN CITY JOURNAL": "绿色城市期刊",
+  "How Rooftop Gardens Cool Our Cities": "屋顶花园如何为城市降温",
+  "By Ada Fernández · 6 min read": "作者 Ada Fernández · 阅读约 6 分钟",
+  "On a hot July afternoon, the asphalt roofs of a dense city can reach temperatures above 70 °C. Rooftop gardens replace that heat-absorbing surface with soil and plants, which shade the building and cool the air through evaporation.":
+    "在炎热的七月午后，密集城区的沥青屋顶温度可超过 70 °C。屋顶花园用土壤和植物取代了这种吸热表面，既为建筑遮阴，又通过蒸发作用为空气降温。",
+  "Researchers measured top-floor apartments under green roofs and found indoor temperatures two to four degrees lower than under conventional roofs during summer heat waves.":
+    "研究人员测量了绿色屋顶下的顶层公寓，发现在夏季热浪期间，其室内温度比普通屋顶下低二到四度。",
+  "Catching the rain": "留住雨水",
+  "A vegetated roof works like a sponge. Depending on the depth of the growing layer, it can hold back around sixty percent of the rain that falls on it, easing pressure on overloaded storm drains.":
+    "植被屋顶就像一块海绵。根据种植层的厚度，它能截留落在其上约六成的雨水，缓解不堪重负的雨水管网的压力。",
+  "Shallow sedum roofs are light and need little maintenance.": "浅层景天屋顶重量轻，几乎不需要维护。",
+  'Deeper "intensive" roofs can support shrubs and even small trees.': "更深的“密集型”屋顶可以种植灌木，甚至小型乔木。",
+  "Stepping stones for wildlife": "野生动物的踏脚石",
+  "Bees, butterflies and birds use rooftop gardens as stepping stones between parks, turning a grey skyline into a connected habitat network.":
+    "蜜蜂、蝴蝶和鸟类把屋顶花园当作公园之间的踏脚石，让灰色的天际线变成相互连通的栖息地网络。",
+  "The upfront cost is higher than a standard roof, but energy savings and a longer membrane life usually pay it back within fifteen years.":
+    "前期成本高于普通屋顶，但节省的能源和更长的防水层寿命通常能在十五年内收回投入。",
+  "Load more": "加载更多",
+  "This paragraph was loaded dynamically after the page finished rendering.": "这一段是在页面渲染完成后动态加载的。",
+};
+const FILLER = "这是本地模拟服务返回的示例译文，用于测试双语对照的排版效果。";
+export function mockTranslate(text) {
+  const t = text.trim();
+  if (ZH[t]) return ZH[t];
+  const n = Math.max(6, Math.round(t.length / 2.2));
+  return (FILLER.repeat(Math.ceil(n / FILLER.length) + 1)).slice(0, n).replace(/[，、]$/, "") + "。";
+}
 
 function longArticle(chapters = 70) {
   const paras = Array.from({ length: chapters }, (_, i) => `<h2>Chapter ${i + 1}</h2><p>${`Section ${i + 1} discusses urban heat, rainfall retention and pollinators in considerable detail. `.repeat(5)}</p>`).join("\n");
@@ -119,14 +151,14 @@ export function startMock(port = 0) {
       }
       if (/Translate the user's text/.test(sysText)) {
         stats.selectionRequests++;
-        out.chunk(model, `【划词】${lastText}`);
+        out.chunk(model, mockTranslate(lastText));
         return out.end(model);
       }
       if (/professional translator/.test(sysText)) {
         stats.translateRequests++;
         const texts = JSON.parse(lastText);
         stats.translatedItems += texts.length;
-        const reply = JSON.stringify(texts.map((t) => `【译】${t}`));
+        const reply = JSON.stringify(texts.map((t) => mockTranslate(t)));
         for (const c of chunks(reply, 40)) {
           out.chunk(model, c);
           await sleep(5);
