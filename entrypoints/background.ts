@@ -224,6 +224,8 @@ export default defineBackground({
           return reply((async () => (await ensureContentScript(msg.tabId), chrome.tabs.sendMessage(msg.tabId, { type: "page:extract" })))());
         case "page:locate":
           return reply((async () => (await ensureContentScript(msg.tabId), chrome.tabs.sendMessage(msg.tabId, { type: "page:locate", text: msg.text })))());
+        case "page:selection":
+          return reply((async () => (await ensureContentScript(msg.tabId), chrome.tabs.sendMessage(msg.tabId, { type: "page:selection" })))());
         case "provider:test":
           return reply(
             (async () => {
