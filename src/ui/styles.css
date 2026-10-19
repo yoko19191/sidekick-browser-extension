@@ -102,7 +102,8 @@ body {
 @keyframes pp-blink { 50% { opacity: 0; } }
 
 /* footnote citations → clickable "locate in page" chips */
-.md sup a[data-footnote-ref] { @apply ml-0.5 inline-grid min-w-[1.35em] place-items-center rounded-[6px] bg-primary-soft px-1 text-[10.5px] font-semibold text-primary-soft-foreground no-underline hover:bg-primary hover:text-primary-foreground; }
+.md sup a[data-footnote-ref] { @apply ml-0.5 inline-grid h-[1.5em] min-w-[1.5em] place-items-center leading-none align-[0.15em] rounded-[6px] bg-primary-soft px-1 text-[10.5px] font-semibold text-primary-soft-foreground no-underline hover:bg-primary hover:text-primary-foreground; }
+.md sup { line-height: 1; }
 .md section[data-footnotes] { @apply mt-3 rounded-[12px] bg-card px-3 py-2 text-[12.5px] text-muted-foreground; }
 .md section[data-footnotes] h2 { @apply sr-only; }
 .md section[data-footnotes] ol { @apply my-0; }
