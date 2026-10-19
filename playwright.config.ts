@@ -5,5 +5,5 @@ export default defineConfig({
   timeout: 120_000,
   workers: 1,
   reporter: [["list"]],
-  use: { trace: "off" },
+  use: { trace: "off", actionTimeout: 15_000, navigationTimeout: 20_000 },
 });

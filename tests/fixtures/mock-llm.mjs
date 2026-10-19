@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 
 const FIXTURE_DIR = new URL("./", import.meta.url);
-export const stats = { translateRequests: 0, translatedItems: 0, chatRequests: 0, authHeaders: new Set() };
+export const stats = { translateRequests: 0, translatedItems: 0, chatRequests: 0, sectionRequests: 0, selectionRequests: 0, toolRequests: 0, authHeaders: new Set() };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const SUMMARY = `**TL;DR**：这篇文章介绍了城市屋顶花园如何降低室温、吸收雨水并改善生物多样性。
@@ -18,7 +18,14 @@ const SUMMARY = `**TL;DR**：这篇文章介绍了城市屋顶花园如何降低
 - **成本**：初期投入较高，但 15 年内可通过节能收回。
 
 ### 为什么重要
-城市热岛效应正在加剧，屋顶花园是少数能**同时**解决温度、排水与生态问题的低技术方案。`;
+城市热岛效应正在加剧，屋顶花园是少数能**同时**解决温度、排水与生态问题的低技术方案。[^1]
+
+[^1]: it can hold back around sixty percent of the rain that falls on it`;
+
+function longArticle() {
+  const paras = Array.from({ length: 70 }, (_, i) => `<h2>Chapter ${i + 1}</h2><p>${`Section ${i + 1} discusses urban heat, rainfall retention and pollinators in considerable detail. `.repeat(5)}</p>`).join("\n");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A Very Long Report on Green Roofs</title></head><body><article><h1>A Very Long Report on Green Roofs</h1>${paras}</article></body></html>`;
+}
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -52,6 +59,10 @@ export function startMock(port = 0) {
     cors(res);
     if (req.method === "OPTIONS") return res.writeHead(204).end();
     const url = new URL(req.url, "http://x");
+    if (url.pathname === "/fixtures/long.html") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(longArticle());
+    }
     if (url.pathname.startsWith("/fixtures/")) {
       try {
         const body = readFileSync(new URL(url.pathname.slice("/fixtures/".length), FIXTURE_DIR));
@@ -64,6 +75,10 @@ export function startMock(port = 0) {
     if (url.pathname === "/__stats") {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ...stats, authHeaders: [...stats.authHeaders] }));
+    }
+    if (url.pathname.startsWith("/v1/") && req.headers.authorization === "Bearer bad-key") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: "Incorrect API key provided", type: "invalid_request_error", code: "invalid_api_key" } }));
     }
     if (url.pathname === "/v1/models") {
       stats.authHeaders.add(req.headers.authorization ?? "");
@@ -81,6 +96,26 @@ export function startMock(port = 0) {
       const last = body.messages[body.messages.length - 1];
       const lastText = typeof last.content === "string" ? last.content : last.content.map((p) => p.text ?? "").join("");
       const out = sse(res);
+      if (Array.isArray(body.tools) && body.tools.length) {
+        stats.toolRequests++;
+        const name = body.tools[0].function?.name ?? "tool";
+        const args = JSON.stringify({ city: "Paris" });
+        res.write(`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name, arguments: "" } }] }, finish_reason: null }] })}\n\n`);
+        for (const c of chunks(args, 5)) res.write(`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: c } }] }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
+      if (/This is section \d+ of \d+/.test(sysText)) {
+        stats.sectionRequests++;
+        out.chunk(model, `- Notes for ${sysText.match(/section (\d+) of (\d+)/)[0]}: heat, rain, pollinators. "urban heat, rainfall retention and pollinators"`);
+        return out.end(model);
+      }
+      if (/Translate the user's text/.test(sysText)) {
+        stats.selectionRequests++;
+        out.chunk(model, `【划词】${lastText}`);
+        return out.end(model);
+      }
       if (/professional translator/.test(sysText)) {
         stats.translateRequests++;
         const texts = JSON.parse(lastText);
@@ -107,7 +142,7 @@ export function startMock(port = 0) {
         out.chunk(model, "ok");
         return out.end(model);
       }
-      const text = /Summarize this page/.test(lastText) ? SUMMARY : `收到：${lastText.slice(0, 60)}\n\n这是来自本地 mock 服务的流式回复。`;
+      const text = /<notes /.test(sysText) ? `**长文总结**：共 ${(sysText.match(/## Section/g) ?? []).length} 段笔记已合并。` : /Summarize this page/.test(lastText) ? SUMMARY : `收到：${lastText.slice(0, 60)}\n\n这是来自本地 mock 服务的流式回复。`;
       for (const c of chunks(text, 6)) {
         out.chunk(model, c);
         await sleep(12);
