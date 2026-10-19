@@ -127,3 +127,15 @@ export async function keyStatus(): Promise<Record<string, string>> {
   for (const [k, v] of Object.entries(all)) if (k.startsWith(SECRET_PREFIX) && typeof v === "string") out[k.slice(SECRET_PREFIX.length)] = maskKey(v);
   return out;
 }
+
+/** Turn provider / network errors into a readable reason (spec 3.5: key wrong / no balance / network). */
+export function friendlyError(raw: string): string {
+  const m = raw || "";
+  if (/\b(401|403)\b|invalid[_ ]api[_ ]key|incorrect api key|unauthori[sz]ed|authentication/i.test(m)) return "API Key 无效或没有权限，请检查 Key 是否填对";
+  if (/\b402\b|insufficient|balance|quota|billing|余额/i.test(m)) return "账户余额不足或额度已用完";
+  if (/\b429\b|rate limit|too many requests/i.test(m)) return "请求过于频繁，请稍后再试";
+  if (/\b404\b|model.*(not exist|not found)|no such model/i.test(m)) return "地址或模型不存在，请检查 Base URL 和模型名";
+  if (/failed to fetch|networkerror|network error|ECONNREFUSED|ENOTFOUND|timed? ?out|aborted|load failed/i.test(m)) return "网络不通：无法连接到服务地址";
+  if (/\b5\d\d\b/.test(m)) return "服务商暂时不可用（5xx），请稍后再试";
+  return m.slice(0, 200) || "未知错误";
+}

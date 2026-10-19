@@ -2,7 +2,7 @@
  * Model layer (service worker only). Uses pi-ai's per-protocol stream functions, imported statically
  * because MV3 service workers do not support dynamic import().
  */
-import type { Api, AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessageEvent, Context, Model, Tool, ToolCall } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { streamSimple as openaiStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthropic-messages";
@@ -40,6 +40,7 @@ export interface StreamArgs {
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  tools?: Tool[];
 }
 
 function streamFor(kind: ProviderKind) {
@@ -50,11 +51,12 @@ function streamFor(kind: ProviderKind) {
 export async function streamText(
   args: StreamArgs,
   cb: { onDelta?: (t: string) => void; onThinking?: () => void } = {},
-): Promise<{ text: string; stopReason?: string }> {
+): Promise<{ text: string; stopReason?: string; toolCalls: ToolCall[] }> {
   const model = toPiModel(args.provider, args.modelId);
   const now = Date.now();
   const ctx: Context = {
     systemPrompt: args.system,
+    tools: args.tools,
     messages: args.messages.map((m) =>
       m.role === "user"
         ? { role: "user", content: m.content, timestamp: now }
@@ -77,20 +79,23 @@ export async function streamText(
     maxTokens: args.maxTokens,
   } as never);
   let text = "";
+  const toolCalls: ToolCall[] = [];
   for await (const ev of stream as AsyncIterable<AssistantMessageEvent>) {
     if (ev.type === "text_delta") {
       text += ev.delta;
       cb.onDelta?.(ev.delta);
     } else if (ev.type === "thinking_delta" || ev.type === "thinking_start") {
       cb.onThinking?.();
+    } else if (ev.type === "toolcall_end") {
+      toolCalls.push(ev.toolCall);
     } else if (ev.type === "error") {
       if (ev.reason === "aborted") throw new DOMException("aborted", "AbortError");
       throw new Error(redactSecrets(ev.error.errorMessage || "模型请求失败", [args.apiKey]));
     } else if (ev.type === "done") {
-      return { text, stopReason: ev.reason };
+      return { text, stopReason: ev.reason, toolCalls };
     }
   }
-  return { text };
+  return { text, toolCalls };
 }
 
 // ---- connection test / model listing (plain fetch, no SDK needed) ----

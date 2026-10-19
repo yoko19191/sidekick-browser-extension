@@ -63,3 +63,14 @@ describe("settings defaults", () => {
     expect(defaultTargetLang("en-US")).toBe("zh-CN");
   });
 });
+
+import { friendlyError } from "@/src/lib/providers";
+describe("friendlyError", () => {
+  it("maps common failures to readable reasons", () => {
+    expect(friendlyError("HTTP 401 {\"error\":\"Incorrect API key\"}")).toMatch(/Key 无效/);
+    expect(friendlyError("402 Insufficient Balance")).toMatch(/余额不足/);
+    expect(friendlyError("TypeError: Failed to fetch")).toMatch(/网络不通/);
+    expect(friendlyError("HTTP 404 model not found")).toMatch(/不存在/);
+    expect(friendlyError("weird")).toBe("weird");
+  });
+});

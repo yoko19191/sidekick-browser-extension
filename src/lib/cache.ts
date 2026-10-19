@@ -1,4 +1,5 @@
-import { openDB, type IDBPDatabase } from "idb";
+import type { IDBPDatabase } from "idb";
+import { CACHE_STORE, DB_NAME, openPagePilotDB } from "./db";
 
 export interface CacheEntry {
   key: string;
@@ -7,19 +8,14 @@ export interface CacheEntry {
   lastUsed: number;
 }
 
-const DB_NAME = "pagepilot";
-const STORE = "translation_cache";
+const STORE = CACHE_STORE;
 
 /** IndexedDB translation cache with simple LRU trimming. Lives in the extension origin (service worker). */
 export class TranslationCache {
   private dbp: Promise<IDBPDatabase>;
-  constructor(private maxEntries = 20000, dbName = DB_NAME) {
-    this.dbp = openDB(dbName, 1, {
-      upgrade(db) {
-        const s = db.createObjectStore(STORE, { keyPath: "key" });
-        s.createIndex("lastUsed", "lastUsed");
-      },
-    });
+  /** Default 100k entries ≈ 50 MB at typical paragraph sizes (spec: LRU, ~50 MB). */
+  constructor(public maxEntries = 100000, dbName = DB_NAME) {
+    this.dbp = openPagePilotDB(dbName);
   }
 
   async getMany(keys: string[]): Promise<(string | undefined)[]> {

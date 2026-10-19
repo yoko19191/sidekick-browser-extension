@@ -18,6 +18,7 @@ export type ModelRef = "auto" | `${string}::${string}`;
 export type TranslationStyle = "plain" | "dashed" | "faded" | "highlight" | "card";
 export type SummaryLength = "short" | "medium" | "detailed";
 export type ThemeMode = "system" | "light" | "dark";
+export type DisplayMode = "bilingual" | "translation-only";
 
 export interface Settings {
   theme: ThemeMode;
@@ -32,6 +33,13 @@ export interface Settings {
     autoTranslateDynamic: boolean;
     extraPrompt: string;
     skipSelectors: string;
+    displayMode: DisplayMode;
+    /** Hosts translated automatically on load (needs a per-site host grant). */
+    autoSites: string[];
+    /** Hosts never translated / no floating button. */
+    neverSites: string[];
+    floatingButton: boolean;
+    selectionTranslate: boolean;
   };
   summary: {
     length: SummaryLength;
@@ -40,6 +48,13 @@ export interface Settings {
     maxContextChars: number;
   };
   chat: { temperature: number; maxTokens: number };
+  prompts: {
+    /** Empty = built-in template. */
+    summary: string;
+    chatSystem: string;
+    keyPoints: string;
+  };
+  cache: { maxEntries: number };
 }
 
 // ---- messaging ----
@@ -63,6 +78,7 @@ export type PortEvent =
   | { type: "start"; id: string; model: string }
   | { type: "delta"; id: string; text: string }
   | { type: "thinking"; id: string }
+  | { type: "progress"; id: string; done: number; total: number }
   | { type: "done"; id: string; stopReason?: string }
   | { type: "error"; id: string; message: string }
   | { type: "pong"; bootId: string };

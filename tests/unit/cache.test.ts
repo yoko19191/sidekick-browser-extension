@@ -41,3 +41,17 @@ describe("TranslationCache (IndexedDB)", () => {
     expect(await c.getMany(["k0", "k1", "k2", "k3"])).toEqual(["0", undefined, "2", "3"]);
   });
 });
+
+import { ConversationStore } from "@/src/lib/db";
+describe("ConversationStore", () => {
+  it("lists newest first", async () => {
+    const s = new ConversationStore(`c-${Math.random()}`);
+    const base = { url: "u", title: "t", host: "h", messages: [], createdAt: 0 };
+    await s.put({ ...base, id: "a", updatedAt: 1 });
+    await s.put({ ...base, id: "b", updatedAt: 3 });
+    await s.put({ ...base, id: "c", updatedAt: 2 });
+    expect((await s.list()).map((c) => c.id)).toEqual(["b", "c", "a"]);
+    await s.delete("b");
+    expect((await s.list()).length).toBe(2);
+  });
+});

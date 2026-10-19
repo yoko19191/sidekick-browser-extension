@@ -27,9 +27,16 @@ export function defaultSettings(uiLang?: string): Settings {
       autoTranslateDynamic: true,
       extraPrompt: "",
       skipSelectors: "",
+      displayMode: "bilingual",
+      autoSites: [],
+      neverSites: [],
+      floatingButton: true,
+      selectionTranslate: true,
     },
     summary: { length: "medium", language: "target", maxContextChars: 48000 },
     chat: { temperature: 0.3, maxTokens: 4096 },
+    prompts: { summary: "", chatSystem: "", keyPoints: "" },
+    cache: { maxEntries: 100000 },
   };
 }
 
@@ -43,6 +50,7 @@ export function mergeSettings(defaults: Settings, stored: unknown): Settings {
     for (const [k, dv] of Object.entries(d)) {
       const sv = isObj(s) ? s[k] : undefined;
       if (isObj(dv)) out[k] = walk(dv, sv);
+      else if (Array.isArray(dv)) out[k] = Array.isArray(sv) ? sv.filter((x) => typeof x === "string") : dv;
       else out[k] = sv !== undefined && typeof sv === typeof dv ? sv : dv;
     }
     return out;

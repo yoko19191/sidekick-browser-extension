@@ -49,3 +49,15 @@ describe("shouldTranslate / prompt", () => {
     expect(JSON.parse(p.user)).toEqual(["a", "b"]);
   });
 });
+
+import { chunkMarkdown } from "@/src/lib/prompts";
+describe("chunkMarkdown (long-page summaries)", () => {
+  it("keeps short pages whole and splits long ones on boundaries without losing text", () => {
+    expect(chunkMarkdown("short", 100)).toEqual(["short"]);
+    const md = Array.from({ length: 60 }, (_, i) => `## H${i}\n\n${"word ".repeat(80)}`).join("\n\n");
+    const parts = chunkMarkdown(md, 2000);
+    expect(parts.length).toBeGreaterThan(5);
+    expect(parts.every((p) => p.length <= 2000)).toBe(true);
+    expect(parts.join(" ").replace(/\s+/g, "")).toBe(md.replace(/\s+/g, ""));
+  });
+});
