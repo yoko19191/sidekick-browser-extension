@@ -15,6 +15,16 @@ export default defineBackground({
   main() {
     const bootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const cache = new TranslationCache();
+    // Idle watchdog: Chrome terminates an MV3 SW after 30s without an incoming extension event
+    // (runtime message, port message, API event). We record the longest such gap so the e2e
+    // suite can verify the keepalive even when the test harness itself pins the worker.
+    let lastEventAt = Date.now();
+    let maxIdleGapMs = 0;
+    const noteEvent = () => {
+      const now = Date.now();
+      maxIdleGapMs = Math.max(maxIdleGapMs, now - lastEventAt);
+      lastEventAt = now;
+    };
 
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
     // Keys live in storage.local; restrict it to trusted extension contexts where supported.
@@ -137,6 +147,7 @@ export default defineBackground({
     }
 
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      noteEvent();
       const reply = (p: Promise<unknown>) => {
         p.then((data) => sendResponse({ ok: true, data })).catch((e: Error) => sendResponse({ ok: false, error: redactSecrets(e?.message ?? String(e)) }));
         return true;
@@ -155,6 +166,9 @@ export default defineBackground({
         case "panel:ask":
           return tabId ? reply(openPanelFor(tabId, { type: "ask", text: String(msg.text ?? "").slice(0, 4000) })) : false;
         case "sw:info":
+          return reply(Promise.resolve({ bootId, maxIdleGapMs }));
+        case "sw:idle-reset":
+          maxIdleGapMs = 0;
           return reply(Promise.resolve({ bootId }));
       }
       // Extension pages (side panel, options page, or the panel page opened in a tab) — never content scripts.
@@ -207,6 +221,7 @@ export default defineBackground({
 
     // ---- streaming chat over a long-lived port (keeps the SW alive while active) ----
     chrome.runtime.onConnect.addListener((port) => {
+      noteEvent();
       if (port.name !== LLM_PORT || port.sender?.id !== chrome.runtime.id) return;
       const running = new Map<string, AbortController>();
       const send = (e: PortEvent) => {
@@ -218,6 +233,7 @@ export default defineBackground({
       };
       port.onDisconnect.addListener(() => running.forEach((c) => c.abort()));
       port.onMessage.addListener(async (req: PortRequest) => {
+        noteEvent();
         if (req.type === "ping") return send({ type: "pong", bootId });
         if (req.type === "abort") return running.get(req.id)?.abort();
         if (req.type !== "chat") return;
