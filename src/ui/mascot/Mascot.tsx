@@ -36,6 +36,12 @@ import { tr } from "@/src/i18n";
 export type MascotState = "idle" | "typing" | "waiting" | "generating" | "translating" | "done" | "needs-action" | "error" | "sleeping" | "surprised";
 export const MASCOT_STATES: MascotState[] = ["idle", "typing", "waiting", "generating", "translating", "done", "needs-action", "error", "sleeping", "surprised"];
 
+/**
+ * Component state → designer drawing (appendix C.2 names in the SVG's data-state):
+ *   idle→idle · typing→listening · waiting→thinking · generating→working · translating→working
+ *   done→done · needs-action→needs-you · error→error · sleeping→sleep · surprised→listening
+ * Each list is tried in order; a component-named drawing (e.g. data-state="typing") wins if the art adds one.
+ */
 export const DRAWING: Record<MascotState, string[]> = {
   idle: ["idle"], typing: ["typing", "listening"], waiting: ["waiting", "thinking"], generating: ["generating", "working"],
   translating: ["translating", "working"], done: ["done"], "needs-action": ["needs-action", "needs-you"], error: ["error"],
@@ -58,6 +64,8 @@ function listen() {
   document.documentElement.addEventListener("pointerleave", leave);
   window.addEventListener("blur", leave);
 }
+/** Shapes squashed on blink. `:scope` keeps the host span (it carries data-state too) out of the match, so the whole <svg> is never squashed. */
+export const BLINK_SELECTOR = ':scope [data-state="idle"] > *';
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Show, in every group whose children carry data-state, the first child matching `keys` (else the idle one). */
@@ -157,7 +165,7 @@ export function Mascot({ state = "idle", size = 48, still = false, hold = false,
       if (face) face.style.transform = `translate(${cur.x.toFixed(2)}px,${cur.y.toFixed(2)}px) scale(${cur.s.toFixed(3)})`;
       if (blink !== cur.blink) {
         cur.blink = blink;
-        const idleKids = root.querySelectorAll<SVGElement>('[data-state="idle"] > *');
+        const idleKids = root.querySelectorAll<SVGElement>(BLINK_SELECTOR);
         idleKids.forEach((el) => { el.style.transformBox = "fill-box"; el.style.transformOrigin = "center"; el.style.transform = blink === 1 ? "" : `scaleY(${blink.toFixed(3)})`; });
       }
       const moving = Math.abs(tx - cur.x) + Math.abs(ty - cur.y) + Math.abs(ts - cur.s) * 20 > 0.05;

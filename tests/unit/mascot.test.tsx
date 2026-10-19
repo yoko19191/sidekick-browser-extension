@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { DRAWING, MASCOT_STATES, Mascot, showDrawing } from "../../src/ui/mascot/Mascot";
+import { BLINK_SELECTOR, DRAWING, MASCOT_STATES, Mascot, showDrawing } from "../../src/ui/mascot/Mascot";
 import raw from "../../assets/mascot/fanfan-layered.svg?raw";
 
 describe("Mascot art contract", () => {
@@ -32,5 +32,15 @@ describe("Mascot art contract", () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const m of html.matchAll(/url\(#([^)]+)\)/g)) expect(ids).toContain(m[1]);
     expect(html).not.toMatch(/<svg[^>]*\swidth=/);
+  });
+
+  it("blink only targets the idle eye shapes, never the <svg> itself", () => {
+    const host = document.createElement("span");
+    host.setAttribute("data-state", "idle"); // the component host carries data-state too
+    host.innerHTML = raw;
+    const hits = [...host.querySelectorAll(BLINK_SELECTOR)];
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.some((el) => el.tagName.toLowerCase() === "svg")).toBe(false);
+    for (const el of hits) expect(el.closest('[data-state="idle"]')).not.toBe(host);
   });
 });
