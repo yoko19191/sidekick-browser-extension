@@ -1,0 +1,9 @@
+{
+  "extName": { "message": "翻翻 Sidekick" },
+  "extShortName": { "message": "翻翻" },
+  "extDescription": { "message": "AI side panel: bilingual web translation, selection translation, page summaries and Q&A. Bring your own API key — no server." },
+  "actionTitle": { "message": "Open Sidekick" },
+  "cmdToggleTranslate": { "message": "Translate page / show original" },
+  "brandName": { "message": "Sidekick" },
+  "brandHeader": { "message": "Sidekick" }
+}

@@ -1,0 +1,9 @@
+{
+  "extName": { "message": "翻翻 Sidekick" },
+  "extShortName": { "message": "翻翻" },
+  "extDescription": { "message": "侧栏 AI 助手：网页双语翻译、划词翻译、页面总结与问答。使用你自己的 API Key，无服务器。" },
+  "actionTitle": { "message": "打开翻翻" },
+  "cmdToggleTranslate": { "message": "翻译当前页面 / 显示原文" },
+  "brandName": { "message": "翻翻" },
+  "brandHeader": { "message": "翻翻 Sidekick" }
+}

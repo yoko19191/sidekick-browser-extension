@@ -1,0 +1,10 @@
+node_modules
+.output
+.wxt
+dist
+test-results
+playwright-report
+*.log
+.env*
+.output-e2e
+.output-e2e-nohost
