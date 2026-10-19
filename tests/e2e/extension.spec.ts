@@ -298,7 +298,7 @@ test.describe.serial("翻翻 Sidekick v1", () => {
       await ui.locator(".card .out[data-done]").waitFor();
     };
     await expect(ui.locator(".fab")).toBeVisible({ timeout: 10_000 });
-    await expect.poll(sidePanels).toBe(0);
+    await closePanel(); // the previous test's 发到侧栏追问 already opened a real panel
 
     // control: without a user gesture Chrome refuses
     const ctl = await sw.evaluate((id) => chrome.sidePanel.open({ tabId: id }).then(() => "opened", (e: Error) => e.message), tabId);
