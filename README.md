@@ -38,6 +38,7 @@ npm run zip          # 打包 → .output/sidekick-extension-0.1.0-chrome.zip
 npm run compile      # tsc --noEmit
 npm test             # vitest 单元测试
 npm run test:e2e     # 构建 e2e 版本并跑 Playwright（本地 mock 模型服务，不调用任何付费 API）
+npm run test:e2e:nohost      # 无任何主机权限的构建：授权提示、不注入、不发空页面请求
 npm run check:permissions   # manifest 权限必须与 scripts/permissions.allowlist.json 一致
 npm run screenshots  # 生成亮/暗两套截图 → /workspace/deliverables/sidepanel-ext（可用 SHOTS_DIR 覆盖）
 DEEPSEEK_API_KEY=… npm run test:live   # 可选：用真实 DeepSeek 跑一次连接测试/总结/批量翻译（不在 npm test 里，未设置变量则跳过）
@@ -83,4 +84,17 @@ tests/e2e/     Playwright：引导、对话、全文翻译、划词翻译、设�
 scripts/       check-permissions.mjs · permissions.allowlist.json · make-icons.mjs · screenshots.mjs
 ```
 
-权限说明见 [PERMISSIONS.md](./PERMISSIONS.md)。
+## 界面文案（i18n）
+
+所有界面文案在 `src/i18n/`：`zh_CN.ts` 是完整目录，`en.ts` 目前只有品牌名，缺的 key 自动回退到中文。代码里用 `tr("chat.translating", { done, total })`。
+加一种语言 = 加一个目录文件并在 `src/i18n/index.ts` 注册，无需改其它代码；`tests/unit/i18n.test.ts` 会拦截新写进代码里的中文硬编码。
+扩展名称、描述、快捷键说明在 `public/_locales/{zh_CN,en}`。
+
+## 其它文档
+
+- 权限说明：[PERMISSIONS.md](./PERMISSIONS.md)
+- 发版前手动验收（真实权限弹窗、activeTab 过期等）：[MANUAL-QA.md](./MANUAL-QA.md)
+
+## License
+
+MIT
