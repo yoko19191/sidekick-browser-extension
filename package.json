@@ -3,6 +3,7 @@
   "description": "翻翻 Sidekick – AI side panel for bilingual web translation and page summaries (BYOK)",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -48,5 +49,8 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
     "wxt": "^0.21.4"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   }
 }
