@@ -1,17 +1,18 @@
 import {
-  ArrowUp, Check, Copy, FileText, Globe, KeyRound, Languages, Lightbulb, ListChecks, Loader2, Lock, RotateCcw, Settings as SettingsIcon, Sparkles, Square, SquarePen, X,
+  ArrowUp, Check, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, Plus, RotateCcw, Settings2, Square, Trash2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { keyOptional, resolveModelRef } from "@/src/lib/providers";
-import { langLabel } from "@/src/lib/settings";
-import type { ChatTurn, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
-import { Button, cx, IconButton } from "./components/ui";
+import { ConversationStore, type Conversation } from "@/src/lib/db";
+import { DEFAULT_KEYPOINTS_TEMPLATE } from "@/src/lib/prompts";
+import { keyOptional, modelRef, resolveModelRef } from "@/src/lib/providers";
+import { LANGUAGES, langLabel } from "@/src/lib/settings";
+import type { ChatTurn, DisplayMode, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
+import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, Popover, PopoverContent, PopoverTrigger, Segmented, Select, Switch, useToast } from "./components/ui";
 import { Logo } from "./components/Logo";
-import { useActiveTab } from "./hooks";
+import { useActiveTab, type TabInfo } from "./hooks";
 import { bg, llm } from "./messaging";
-import type { Route } from "./pages/Settings";
 
 interface Msg extends ChatTurn {
   id: string;
@@ -19,29 +20,37 @@ interface Msg extends ChatTurn {
   status?: "streaming" | "thinking" | "done" | "error";
   model?: string;
   error?: string;
+  progress?: { done: number; total: number };
 }
 
-const restricted = (url: string) => !/^https?:|^file:/.test(url) || /^https:\/\/chrome\.google\.com\/webstore|^https:\/\/chromewebstore\.google\.com/.test(url);
+const store = new ConversationStore();
+const restricted = (url: string) => !/^https?:|^file:/.test(url) || /^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/.test(url);
+const newId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-export function ChatView({ settings, providers, masked, openSettings }: { settings: Settings; providers: ProviderConfig[]; masked: Record<string, string>; openSettings: (...r: Route[]) => void }) {
+export function ChatView({ settings, update, providers, masked, onSetup }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ProviderConfig[]; masked: Record<string, string>; onSetup: () => void }) {
   const tab = useActiveTab();
-  const [convos, setConvos] = useState<Record<string, Msg[]>>({});
-  const convKey = tab ? `${tab.id}` : "none";
-  const messages = convos[convKey] ?? [];
-  const setMessages = useCallback((fn: (m: Msg[]) => Msg[]) => setConvos((c) => ({ ...c, [convKey]: fn(c[convKey] ?? []) })), [convKey]);
+  const toast = useToast();
+  const [convs, setConvs] = useState<Record<string, { id: string; messages: Msg[] }>>({});
+  const tabKey = tab ? `${tab.id}` : "none";
+  const conv = convs[tabKey] ?? { id: "", messages: [] };
+  const messages = conv.messages;
+  const setMessages = useCallback(
+    (fn: (m: Msg[]) => Msg[]) => setConvs((c) => ({ ...c, [tabKey]: { id: c[tabKey]?.id || newId(), messages: fn(c[tabKey]?.messages ?? []) } })),
+    [tabKey],
+  );
   const [input, setInput] = useState("");
   const [usePage, setUsePage] = useState(true);
   const [busy, setBusy] = useState<{ abort: () => void } | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [tstate, setTstate] = useState<TranslateState | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const pageCache = useRef(new Map<string, PageContent>());
   const scroller = useRef<HTMLDivElement>(null);
-  const ta = useRef<HTMLTextAreaElement>(null);
 
-  const chatModel = useMemo(() => resolveModelRef(settings.models.chat, providers, (p) => !!masked[p.id] || keyOptional(p)), [settings.models.chat, providers, masked]);
+  const usable = (p: ProviderConfig) => !!masked[p.id] || keyOptional(p);
+  const chatModel = useMemo(() => resolveModelRef(settings.models.chat, providers, usable), [settings.models.chat, providers, masked]);
   const configured = !!chatModel;
 
-  // translation status for the current tab
   useEffect(() => {
     if (!tab) return;
     setTstate(null);
@@ -57,6 +66,16 @@ export function ChatView({ settings, providers, masked, openSettings }: { settin
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // persist finished conversations (history)
+  useEffect(() => {
+    if (!tab || !conv.id || !messages.length || messages.some((m) => m.status === "streaming" || m.status === "thinking")) return;
+    const now = Date.now();
+    store.put({
+      id: conv.id, url: tab.url, title: tab.title || tab.url, host: restricted(tab.url) ? "" : new URL(tab.url).host,
+      messages: messages.filter((m) => m.status !== "error").map(({ role, content, kind, model }) => ({ role, content, kind, model })), createdAt: now, updatedAt: now,
+    }).catch(() => {});
+  }, [messages, conv.id]);
 
   async function getPage(): Promise<PageContent | undefined> {
     if (!tab || restricted(tab.url)) return undefined;
@@ -75,31 +94,24 @@ export function ChatView({ settings, providers, masked, openSettings }: { settin
 
   async function grantSite() {
     if (!tab) return;
-    try {
-      const origin = new URL(tab.url).origin;
-      const ok = await chrome.permissions.request({ origins: [`${origin}/*`] });
-      if (ok) setPageError(null);
-    } catch {
-      /* ignore */
-    }
+    const ok = await chrome.permissions.request({ origins: [`${new URL(tab.url).origin}/*`] }).catch(() => false);
+    if (ok) setPageError(null);
   }
 
   async function send(text: string, kind?: "summary") {
     if (!text.trim() || busy) return;
-    if (!configured) return openSettings("providers");
+    if (!configured) return onSetup();
     const user: Msg = { id: `u${Date.now()}`, role: "user", content: text.trim(), kind };
     const asst: Msg = { id: `a${Date.now()}`, role: "assistant", content: "", status: "streaming", kind };
     const history = [...messages.filter((m) => m.status !== "error"), user].map(({ role, content }) => ({ role, content }));
     setMessages((m) => [...m, user, asst]);
     setInput("");
     const page = kind === "summary" || usePage ? await getPage() : undefined;
-    if (kind === "summary" && !page) {
-      setMessages((m) => m.map((x) => (x.id === asst.id ? { ...x, status: "error", error: "无法读取当前页面内容" } : x)));
-      return;
-    }
     const patch = (f: (x: Msg) => Msg) => setMessages((m) => m.map((x) => (x.id === asst.id ? f(x) : x)));
+    if (kind === "summary" && !page) return patch((x) => ({ ...x, status: "error", error: "无法读取当前页面内容" }));
     const h = llm.chat({ task: kind ?? "chat", messages: history, page: page && { title: page.title, url: page.url, markdown: page.markdown } }, (e) => {
       if (e.type === "start") patch((x) => ({ ...x, model: e.model }));
+      if (e.type === "progress") patch((x) => ({ ...x, progress: { done: e.done, total: e.total } }));
       if (e.type === "thinking") patch((x) => ({ ...x, status: x.content ? x.status : "thinking" }));
       if (e.type === "delta") patch((x) => ({ ...x, status: "streaming", content: x.content + e.text }));
       if (e.type === "done") {
@@ -113,25 +125,29 @@ export function ChatView({ settings, providers, masked, openSettings }: { settin
     });
     setBusy({ abort: h.abort });
   }
+  const summarize = () => send("总结本页", "summary");
 
-  const summarize = () => send("总结此页", "summary");
-
-  // context-menu "summarize" handoff
+  // hand-offs from the page (context menu "summarize", selection card "ask in panel")
   useEffect(() => {
     if (!tab) return;
-    chrome.storage.session.get("pendingAction").then((r) => {
-      const a = r.pendingAction as { type: string; tabId: number; at: number } | undefined;
-      if (a?.type === "summarize" && a.tabId === tab.id && Date.now() - a.at < 30000) {
-        chrome.storage.session.remove("pendingAction");
-        summarize();
-      }
-    });
+    const consume = async () => {
+      const r = await chrome.storage.session.get("pendingAction");
+      const a = r.pendingAction as { type: string; tabId: number; at: number; text?: string } | undefined;
+      if (!a || a.tabId !== tab.id || Date.now() - a.at > 30000) return;
+      await chrome.storage.session.remove("pendingAction");
+      if (a.type === "summarize") summarize();
+      if (a.type === "ask" && a.text) setInput(`关于这段内容：\n> ${a.text.replace(/\n/g, "\n> ")}\n\n`);
+    };
+    consume();
+    const onCh = (ch: Record<string, chrome.storage.StorageChange>, area: string) => area === "session" && ch.pendingAction?.newValue && consume();
+    chrome.storage.onChanged.addListener(onCh);
+    return () => chrome.storage.onChanged.removeListener(onCh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab?.id]);
 
   async function toggleTranslate() {
     if (!tab) return;
-    if (!configured) return openSettings("providers");
+    if (!configured) return onSetup();
     try {
       setTstate(await bg<TranslateState>({ type: "translate:toggle", tabId: tab.id }));
       setPageError(null);
@@ -140,73 +156,109 @@ export function ChatView({ settings, providers, masked, openSettings }: { settin
     }
   }
 
+  async function locate(text: string) {
+    if (!tab) return;
+    try {
+      const r = await bg<{ found: boolean }>({ type: "page:locate", tabId: tab.id, text });
+      if (!r.found) toast({ text: "没在页面上找到这段原文", tone: "info" });
+    } catch (e) {
+      toast({ text: (e as Error).message, tone: "error" });
+    }
+  }
+
   const host = tab && !restricted(tab.url) ? new URL(tab.url).host : "";
   const needsGrant = !!pageError && /permission|Cannot access|must request/i.test(pageError);
   const translating = !!tstate?.active;
+  const allModels = providers.filter((p) => p.enabled && usable(p)).map((p) => ({ p, models: p.models }));
 
   return (
     <div className="flex h-full flex-col">
-      {/* header */}
-      <header className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <Logo />
-        <div className="text-[15px] font-semibold tracking-tight">PagePilot</div>
+      {/* top bar: logo · model switch · new · history · settings */}
+      <header className="flex h-12 shrink-0 items-center gap-1 px-2.5">
+        <Logo size={24} />
+        <Dropdown>
+          <DropdownTrigger asChild>
+            <button data-testid="model-switch" className="ml-1 flex h-8 min-w-0 max-w-[48%] items-center gap-1 rounded-btn px-2 text-[13.5px] font-semibold outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="truncate">{chatModel ? chatModel.modelId : "未配置模型"}</span>
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownTrigger>
+          <DropdownContent testId="model-menu">
+            {allModels.length === 0 && <DropdownItem icon={KeyRound} onSelect={onSetup}>添加 API Key</DropdownItem>}
+            {allModels.map(({ p, models }) => (
+              <div key={p.id}>
+                <DropdownLabel>{p.name}</DropdownLabel>
+                {models.map((m) => (
+                  <DropdownItem key={m} testId={`model-option-${m}`} checked={chatModel?.provider.id === p.id && chatModel.modelId === m}
+                    onSelect={() => update((s) => ({ ...s, models: { ...s.models, chat: modelRef(p.id, m), summary: modelRef(p.id, m) } }))}>
+                    {m}
+                  </DropdownItem>
+                ))}
+              </div>
+            ))}
+            <DropdownSeparator />
+            <DropdownItem icon={Settings2} onSelect={() => chrome.runtime.openOptionsPage()}>管理模型与密钥…</DropdownItem>
+          </DropdownContent>
+        </Dropdown>
         <div className="flex-1" />
-        <IconButton icon={Languages} label={translating ? "显示原文" : "翻译此页"} active={translating} onClick={toggleTranslate} testId="translate-toggle" />
-        <IconButton icon={SquarePen} label="新对话" onClick={() => setMessages(() => [])} />
-        <IconButton icon={SettingsIcon} label="设置" onClick={() => openSettings()} testId="open-settings" />
+        <IconButton icon={Languages} label={translating ? "显示原文" : "翻译本页"} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!host} />
+        <IconButton icon={Plus} label="新对话" onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
+        <IconButton icon={History} label="历史会话" onClick={() => setHistoryOpen(true)} testId="open-history" />
+        <QuickSettings settings={settings} update={update} tab={tab} host={host} />
       </header>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {!configured && <Onboarding onAdd={() => openSettings("providers", "provider-presets")} />}
-
+        {host && (
+          <div className="mt-1 flex items-center gap-2.5 rounded-card bg-card px-3 py-2.5" data-testid="page-chip">
+            {tab?.favIconUrl ? <img src={tab.favIconUrl} className="size-4 rounded-[4px]" alt="" /> : <Globe className="size-4 text-muted-foreground" />}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium">{tab?.title || host}</div>
+              <div className="truncate text-[12px] text-muted-foreground">{host}</div>
+            </div>
+          </div>
+        )}
         {messages.length === 0 ? (
-          <EmptyState
-            tabTitle={tab?.title}
-            host={host}
-            favicon={tab?.favIconUrl}
-            disabled={!tab || restricted(tab.url)}
-            translating={translating}
-            targetLang={langLabel(settings.translation.targetLang)}
-            onSummarize={summarize}
-            onTranslate={toggleTranslate}
-            onPrompt={(p) => send(p)}
-          />
+          <EmptyState host={host} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
+            onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
         ) : (
-          <div className="space-y-5 pt-2">
-            {messages.map((m) => (
-              <MessageItem key={m.id} m={m} onRetry={() => send(messages[messages.indexOf(m) - 1]?.content ?? "", m.kind)} />
-            ))}
+          <div className="space-y-5 pt-4">
+            {messages.map((m, i) => <MessageItem key={m.id} m={m} onRetry={() => send(messages[i - 1]?.content ?? "", m.kind)} onLocate={locate} />)}
           </div>
         )}
       </div>
 
-      {/* status strips */}
       <div className="space-y-2 px-3">
+        {!configured && (
+          <div data-testid="nokey-banner" className="flex animate-in items-center gap-2 rounded-card bg-primary-soft px-3 py-2 text-[12.5px] text-primary-soft-foreground">
+            <KeyRound className="size-4 shrink-0" />
+            <span className="flex-1">还没有配置模型，填一个 API Key 即可开始</span>
+            <Button size="sm" onClick={onSetup} testId="nokey-setup">去配置</Button>
+          </div>
+        )}
         {pageError && (
-          <div className="flex animate-in items-center gap-2 rounded-2xl border border-amber-200/70 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-200">
+          <div className="flex animate-in items-center gap-2 rounded-card bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">
             <Lock className="size-4 shrink-0" />
             <span className="min-w-0 flex-1">{needsGrant ? `需要访问 ${host} 的权限才能读取或翻译此页` : pageError}</span>
-            {needsGrant && <Button size="sm" variant="secondary" onClick={grantSite}>允许</Button>}
-            <button onClick={() => setPageError(null)} className="text-amber-700/60 hover:text-amber-800"><X className="size-4" /></button>
+            {needsGrant && <Button size="sm" variant="outline" onClick={grantSite}>允许</Button>}
+            <button onClick={() => setPageError(null)} className="opacity-60 hover:opacity-100" aria-label="关闭"><X className="size-4" /></button>
           </div>
         )}
         {translating && (
-          <div data-testid="translate-status" className="flex animate-in items-center gap-2 rounded-2xl bg-accent-soft px-3 py-2 text-[12.5px] text-indigo-700 dark:bg-accent/15 dark:text-indigo-200">
-            {tstate!.done < tstate!.total ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-            <span className="flex-1">
-              {tstate!.done < tstate!.total ? `正在翻译 ${tstate!.done}/${tstate!.total}` : `已翻译为${langLabel(settings.translation.targetLang)} · ${tstate!.done} 段`}
-              {tstate!.errors > 0 && <span className="text-rose-500"> · {tstate!.errors} 段失败</span>}
+          <div data-testid="translate-status" className="flex animate-in items-center gap-2 rounded-card bg-card px-3 py-2 text-[12.5px]">
+            {tstate!.done < tstate!.total ? <Loader2 className="size-4 animate-spin text-primary" /> : <Check className="size-4 text-primary" />}
+            <span className="flex-1 text-muted-foreground">
+              {tstate!.done < tstate!.total ? `正在翻译 ${tstate!.done}/${tstate!.total}` : `已译为${langLabel(settings.translation.targetLang)} · ${tstate!.done} 段`}
+              {tstate!.errors > 0 && <span className="text-destructive"> · {tstate!.errors} 段失败，可在页面上重试</span>}
             </span>
-            <button onClick={toggleTranslate} className="rounded-lg px-2 py-0.5 font-medium hover:bg-white/60 dark:hover:bg-white/10">显示原文</button>
+            <button onClick={toggleTranslate} className="rounded-sm px-2 py-0.5 font-medium text-foreground hover:bg-muted">显示原文</button>
           </div>
         )}
       </div>
 
       {/* composer */}
       <div className="shrink-0 p-3 pt-2">
-        <div className="rounded-[22px] border border-zinc-200/80 bg-white shadow-float transition focus-within:border-zinc-300 dark:border-white/[0.08] dark:bg-[#1c1c21] dark:focus-within:border-white/15">
+        <div className="rounded-card bg-card transition focus-within:ring-2 focus-within:ring-ring">
           <textarea
-            ref={ta}
             data-testid="composer"
             rows={1}
             value={input}
@@ -221,157 +273,205 @@ export function ChatView({ settings, providers, masked, openSettings }: { settin
                 send(input);
               }
             }}
-            placeholder={host ? `问问关于这个页面的任何问题…` : "有什么可以帮你？"}
-            className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 text-[14px] leading-6 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+            placeholder="问点什么…"
+            className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3.5 pt-3 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
           />
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-            <button
-              type="button"
-              onClick={() => setUsePage((v) => !v)}
-              disabled={!host}
-              className={cx(
-                "flex h-7 max-w-[55%] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition",
-                usePage && host ? "bg-zinc-100 text-ink dark:bg-white/10 dark:text-zinc-100" : "text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/5",
-              )}
-              title="对话时附带当前页面内容"
-            >
-              <FileText className="size-3.5 shrink-0" />
-              <span className="truncate">{host ? (usePage ? "引用此页" : "不引用页面") : "无页面"}</span>
-            </button>
-            <button type="button" onClick={() => openSettings("models")} className="flex h-7 min-w-0 items-center gap-1 truncate rounded-full px-2 text-[12px] text-zinc-400 transition hover:bg-zinc-50 hover:text-zinc-600 dark:hover:bg-white/5 dark:hover:text-zinc-300" data-testid="model-chip">
-              <Sparkles className="size-3.5 shrink-0" />
-              <span className="truncate">{chatModel ? chatModel.modelId : "未配置模型"}</span>
+            <button type="button" onClick={() => setUsePage((v) => !v)} disabled={!host} data-testid="use-page" data-on={usePage && host ? "" : undefined}
+              className={cn("flex h-7 items-center gap-1.5 rounded-btn px-2.5 text-[12px] font-medium transition", usePage && host ? "bg-background text-foreground" : "text-muted-foreground hover:bg-muted")}>
+              <FileText className="size-3.5" />
+              引用本页
+              {usePage && host && <Check className="size-3.5 text-primary" strokeWidth={2.6} />}
             </button>
             <div className="flex-1" />
             {busy ? (
-              <button onClick={() => busy.abort()} className="grid size-8 place-items-center rounded-full bg-ink text-white transition hover:bg-zinc-700 dark:bg-white dark:text-ink" aria-label="停止">
+              <button onClick={() => busy.abort()} className="grid size-8 place-items-center rounded-btn bg-foreground text-background transition hover:opacity-85" aria-label="停止" data-testid="stop">
                 <Square className="size-3 fill-current" />
               </button>
             ) : (
-              <button
-                onClick={() => send(input)}
-                disabled={!input.trim()}
-                data-testid="send"
-                className="grid size-8 place-items-center rounded-full bg-ink text-white transition hover:bg-zinc-700 disabled:bg-zinc-200 disabled:text-zinc-400 dark:bg-white dark:text-ink dark:disabled:bg-white/10 dark:disabled:text-zinc-500"
-                aria-label="发送"
-              >
+              <button onClick={() => send(input)} disabled={!input.trim()} data-testid="send" aria-label="发送"
+                className="grid size-8 place-items-center rounded-btn bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-input disabled:text-muted-foreground">
                 <ArrowUp className="size-4" strokeWidth={2.4} />
               </button>
             )}
           </div>
         </div>
       </div>
+
+      {historyOpen && (
+        <HistoryDrawer
+          onClose={() => setHistoryOpen(false)}
+          onOpen={(c) => {
+            setConvs((x) => ({ ...x, [tabKey]: { id: c.id, messages: c.messages.map((m, i) => ({ ...m, kind: m.kind as Msg["kind"], id: `${c.id}-${i}`, status: m.role === "assistant" ? "done" : undefined })) } }));
+            setHistoryOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Onboarding({ onAdd }: { onAdd: () => void }) {
+/** Level-1 settings: a popover with only the most frequently changed switches. */
+function QuickSettings({ settings, update, tab, host }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; tab: TabInfo | null; host: string }) {
+  const t = settings.translation;
+  const auto = !!host && t.autoSites.includes(host);
+  const setT = (patch: Partial<Settings["translation"]>) => update((s) => ({ ...s, translation: { ...s.translation, ...patch } }));
+  async function toggleAuto(on: boolean) {
+    if (!host || !tab) return;
+    if (on) {
+      const ok = await chrome.permissions.request({ origins: [`${new URL(tab.url).origin}/*`] }).catch(() => false);
+      if (!ok) return;
+    }
+    setT({ autoSites: on ? [...new Set([...t.autoSites, host])] : t.autoSites.filter((h) => h !== host), neverSites: t.neverSites.filter((h) => h !== host) });
+    if (on) bg({ type: "translate:toggle", tabId: tab.id, force: true }).catch(() => {});
+  }
   return (
-    <div className="mt-3 animate-in overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 p-4 dark:border-indigo-400/15 dark:from-indigo-500/10 dark:via-transparent dark:to-violet-500/10" data-testid="onboarding">
-      <div className="flex items-start gap-3">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white shadow-soft dark:bg-white/10"><KeyRound className="size-[18px] text-accent dark:text-indigo-300" /></span>
-        <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-semibold">接入你的模型</div>
-          <div className="mt-0.5 text-[12.5px] leading-5 text-zinc-500 dark:text-zinc-400">填一个 API Key 即可开始翻译和总结。Key 只保存在本机浏览器里。</div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <IconButton icon={Settings2} label="快捷设置" testId="open-quick-settings" />
+      </PopoverTrigger>
+      <PopoverContent testId="quick-settings">
+        <div className="space-y-3.5">
+          <div>
+            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">目标语言</div>
+            <Select testId="qs-target-lang" value={t.targetLang} onChange={(v) => setT({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />
+          </div>
+          <div>
+            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">翻译显示</div>
+            <Segmented<DisplayMode> testId="qs-display-mode" value={t.displayMode} onChange={(v) => setT({ displayMode: v })} options={[{ value: "bilingual", label: "双语对照" }, { value: "translation-only", label: "仅译文" }]} />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium">本站自动翻译</div>
+              <div className="truncate text-[12px] text-muted-foreground">{host || "当前页面不支持"}</div>
+            </div>
+            <Switch testId="qs-auto-site" checked={auto} onChange={toggleAuto} label="本站自动翻译" />
+          </div>
+          <div className="h-px bg-border/70" />
+          <button data-testid="qs-more" onClick={() => chrome.runtime.openOptionsPage()} className="flex w-full items-center justify-between rounded-btn px-1 py-1 text-[13px] font-medium text-muted-foreground hover:text-foreground">
+            更多设置 <span aria-hidden>→</span>
+          </button>
         </div>
-      </div>
-      <Button className="mt-3 w-full" onClick={onAdd} testId="onboarding-add">添加 API Key</Button>
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
-function EmptyState(p: { tabTitle?: string; host: string; favicon?: string; disabled: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onPrompt: (s: string) => void }) {
-  const actions = [
-    { icon: FileText, title: "总结此页", desc: "一键提炼要点", onClick: p.onSummarize, tone: "text-indigo-500", testId: "action-summarize" },
-    { icon: Languages, title: p.translating ? "显示原文" : "双语翻译", desc: p.translating ? "移除译文" : `译为${p.targetLang}`, onClick: p.onTranslate, tone: "text-emerald-500", testId: "action-translate" },
-    { icon: ListChecks, title: "提取要点", desc: "列出关键信息", onClick: () => p.onPrompt("提取这个页面的关键信息和数据，用要点列出。"), tone: "text-amber-500" },
-    { icon: Lightbulb, title: "解释概念", desc: "通俗讲明白", onClick: () => p.onPrompt("用通俗易懂的方式解释这个页面里最重要的几个概念。"), tone: "text-sky-500" },
+function EmptyState(p: { host: string; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onKeyPoints: () => void }) {
+  const chips = [
+    { icon: FileText, label: "总结本页", onClick: p.onSummarize, testId: "action-summarize" },
+    { icon: Languages, label: p.translating ? "显示原文" : "翻译本页", onClick: p.onTranslate, testId: "action-translate" },
+    { icon: ListChecks, label: "提取要点", onClick: p.onKeyPoints, testId: "action-keypoints" },
   ];
   return (
-    <div className="animate-in pt-8">
+    <div className="animate-in pt-10">
       <div className="px-1">
-        <div className="text-[22px] font-semibold tracking-tight">你好 👋</div>
-        <div className="mt-1 text-[14px] text-zinc-500 dark:text-zinc-400">我可以帮你读懂、翻译和总结这个页面。</div>
+        <div className="text-[22px] font-semibold tracking-tight">有什么可以帮你？</div>
+        <div className="mt-1.5 text-[13.5px] leading-6 text-muted-foreground">{p.host ? `可以总结、翻译（译为${p.targetLang}），或围绕这个页面提问。` : "浏览器内部页面无法读取，你仍可以直接提问。"}</div>
       </div>
       {p.host && (
-        <div className="mt-5 flex items-center gap-2.5 rounded-2xl border border-zinc-200/70 bg-white px-3 py-2.5 shadow-soft dark:border-white/[0.06] dark:bg-[#1a1a1f]" data-testid="page-chip">
-          {p.favicon ? <img src={p.favicon} className="size-4 rounded" alt="" /> : <Globe className="size-4 text-zinc-400" />}
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[13px] font-medium">{p.tabTitle || p.host}</div>
-            <div className="truncate text-[11.5px] text-zinc-400">{p.host}</div>
-          </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {chips.map((c) => (
+            <button key={c.label} data-testid={c.testId} onClick={c.onClick}
+              className="flex h-9 items-center gap-1.5 rounded-btn bg-card px-3 text-[13px] font-medium transition hover:bg-card-strong active:scale-[0.98]">
+              <c.icon className="size-4 text-primary" strokeWidth={1.9} />
+              {c.label}
+            </button>
+          ))}
         </div>
       )}
-      <div className="mt-3 grid grid-cols-2 gap-2.5">
-        {actions.map((a) => (
-          <button
-            key={a.title}
-            data-testid={a.testId}
-            disabled={p.disabled}
-            onClick={a.onClick}
-            className="group rounded-2xl border border-zinc-200/70 bg-white p-3.5 text-left shadow-soft transition hover:-translate-y-px hover:border-zinc-300 hover:shadow-float disabled:pointer-events-none disabled:opacity-50 dark:border-white/[0.06] dark:bg-[#1a1a1f] dark:hover:border-white/15"
-          >
-            <a.icon className={cx("size-5", a.tone)} strokeWidth={1.9} />
-            <div className="mt-2.5 text-[13.5px] font-medium">{a.title}</div>
-            <div className="mt-0.5 text-[12px] text-zinc-400">{a.desc}</div>
-          </button>
-        ))}
-      </div>
-      {p.disabled && <div className="mt-4 text-center text-[12px] text-zinc-400">此页面（浏览器内部页面）无法读取，你仍可以直接提问。</div>}
     </div>
   );
 }
 
-function MessageItem({ m, onRetry }: { m: Msg; onRetry: () => void }) {
+function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; onLocate: (text: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const footnotes = () => [...(ref.current?.querySelectorAll("section[data-footnotes] li") ?? [])].map((li) => li.textContent?.replace(/↩\s*$/, "").trim() ?? "");
+  const onClick = (e: React.MouseEvent) => {
+    const el = e.target as HTMLElement;
+    const refA = el.closest("a[data-footnote-ref]") as HTMLAnchorElement | null;
+    const li = el.closest("section[data-footnotes] li") as HTMLLIElement | null;
+    if (refA) {
+      e.preventDefault();
+      const id = decodeURIComponent(refA.getAttribute("href")?.slice(1) ?? "");
+      const target = ref.current?.querySelector(`[id="${CSS.escape(id)}"]`);
+      if (target?.textContent) onLocate(target.textContent.replace(/↩\s*$/, "").trim());
+    } else if (li) {
+      e.preventDefault();
+      onLocate(li.textContent?.replace(/↩\s*$/, "").trim() ?? "");
+    }
+  };
   if (m.role === "user")
     return (
       <div className="flex animate-in justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-[18px] rounded-br-md bg-zinc-100 px-3.5 py-2 text-[14px] leading-6 dark:bg-white/[0.08]">
-          {m.kind === "summary" ? (
-            <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-indigo-500" />{m.content}</span>
-          ) : (
-            m.content
-          )}
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-card rounded-br-[6px] bg-primary-soft px-3.5 py-2 text-[14px] leading-6 text-foreground">
+          {m.kind === "summary" ? <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{m.content}</span> : m.content}
         </div>
       </div>
     );
   return (
     <div className="animate-in" data-testid="assistant-message" data-status={m.status}>
       {m.status === "error" ? (
-        <div className="rounded-2xl border border-rose-200/70 bg-rose-50 px-3.5 py-2.5 text-[13px] text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300">
+        <div className="rounded-card bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
           {m.content && <div className="md mb-2 opacity-80"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>}
-          <div className="flex items-center gap-2"><span className="flex-1">{m.error}</span><Button size="sm" variant="ghost" icon={RotateCcw} onClick={onRetry}>重试</Button></div>
+          <div className="flex items-center gap-2"><span className="flex-1" data-testid="assistant-error">{m.error}</span><Button size="sm" variant="ghost" icon={RotateCcw} onClick={onRetry}>重试</Button></div>
         </div>
       ) : !m.content ? (
-        <div className="flex items-center gap-2 py-1 text-[13px] text-zinc-400">
-          <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="size-1.5 animate-bounce rounded-full bg-zinc-300 dark:bg-zinc-600" style={{ animationDelay: `${i * 120}ms` }} />)}</span>
-          {m.status === "thinking" ? "思考中…" : m.kind === "summary" ? "正在阅读页面…" : ""}
+        <div className="flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
+          <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: `${i * 120}ms` }} />)}</span>
+          {m.progress && m.progress.total > 1 ? `长文分段阅读中 ${m.progress.done}/${m.progress.total}` : m.status === "thinking" ? "思考中…" : m.kind === "summary" ? "正在阅读页面…" : ""}
         </div>
       ) : (
-        <div className={cx("md", m.status === "streaming" && "caret")} data-testid="assistant-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" /> }}>{m.content}</ReactMarkdown>
+        <div ref={ref} onClick={onClick} className={cn("md", m.status === "streaming" && "caret")} data-testid="assistant-content">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _n, ...props }) => (props.href?.startsWith("#") ? <a {...props} /> : <a {...props} target="_blank" rel="noreferrer" />) }}>{m.content}</ReactMarkdown>
         </div>
       )}
       {m.status === "done" && (
-        <div className="mt-1.5 flex items-center gap-1 text-zinc-400">
-          <button
-            className="grid size-7 place-items-center rounded-lg hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-white/8"
-            title="复制"
-            onClick={() => {
-              navigator.clipboard.writeText(m.content);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1200);
-            }}
-          >
+        <div className="mt-1.5 flex items-center gap-0.5 text-muted-foreground">
+          <ActionBtn title="复制" onClick={() => { navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
             {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          </button>
-          <button className="grid size-7 place-items-center rounded-lg hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-white/8" title="重新生成" onClick={onRetry}>
-            <RotateCcw className="size-3.5" />
-          </button>
-          {m.model && <span className="ml-1 truncate text-[11px]">{m.model}</span>}
+          </ActionBtn>
+          <ActionBtn title="重新生成" onClick={onRetry}><RotateCcw className="size-3.5" /></ActionBtn>
+          {/\[\^\d+\]/.test(m.content) && <ActionBtn title="定位引用到原文" onClick={() => { const f = footnotes()[0]; if (f) onLocate(f); }} testId="locate-citation"><Crosshair className="size-3.5" /></ActionBtn>}
+          {m.model && <span className="ml-1 truncate text-[11.5px]">{m.model}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+function ActionBtn({ children, title, onClick, testId }: { children: React.ReactNode; title: string; onClick: () => void; testId?: string }) {
+  return <button className="grid size-7 place-items-center rounded-sm transition hover:bg-muted hover:text-foreground" title={title} aria-label={title} onClick={onClick} data-testid={testId}>{children}</button>;
+}
+
+function HistoryDrawer({ onClose, onOpen }: { onClose: () => void; onOpen: (c: Conversation) => void }) {
+  const [list, setList] = useState<Conversation[] | null>(null);
+  const load = () => store.list(100).then(setList);
+  useEffect(() => void load(), []);
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-background" data-testid="history">
+      <header className="flex h-12 items-center gap-2 px-3">
+        <History className="size-[18px] text-muted-foreground" />
+        <div className="flex-1 text-[14px] font-semibold">历史会话</div>
+        <IconButton icon={X} label="关闭" onClick={onClose} />
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        {list?.length === 0 && <div className="pt-16 text-center text-[13px] text-muted-foreground">还没有会话记录</div>}
+        <div className="space-y-1.5">
+          {list?.map((c) => (
+            <div key={c.id} className="group flex items-center gap-2 rounded-card bg-card px-3 py-2.5 transition hover:bg-card-strong">
+              <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(c)} data-testid="history-item">
+                <div className="truncate text-[13px] font-medium">{c.messages.find((m) => m.role === "user")?.content || c.title}</div>
+                <div className="mt-0.5 truncate text-[12px] text-muted-foreground">{c.host || "无页面"} · {new Date(c.updatedAt).toLocaleString()}</div>
+              </button>
+              <button className="text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100" aria-label="删除" onClick={async () => { await store.delete(c.id); load(); }}>
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

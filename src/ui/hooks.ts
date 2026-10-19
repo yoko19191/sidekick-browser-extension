@@ -30,9 +30,11 @@ export function useSettings() {
 export function useProviders() {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [masked, setMasked] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
   const refresh = useCallback(async () => {
     setProviders(await loadProviders());
     setMasked(await keyStatus());
+    setLoaded(true);
   }, []);
   useEffect(() => {
     refresh();
@@ -46,7 +48,7 @@ export function useProviders() {
     await saveProviders(list);
     setProviders(list);
   }, []);
-  return { providers, masked, save, refresh };
+  return { providers, masked, save, refresh, loaded };
 }
 
 export function useTheme(mode: Settings["theme"]) {
