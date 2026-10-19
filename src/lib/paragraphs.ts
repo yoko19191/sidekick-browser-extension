@@ -96,6 +96,8 @@ export function restoreOriginal(root: ParentNode): number {
   root.querySelectorAll("[data-pp-done],[data-pp-pending]").forEach((n) => {
     n.removeAttribute("data-pp-done");
     n.removeAttribute("data-pp-pending");
+    (n as HTMLElement).style?.removeProperty("--pp-fs");
+    if ((n as HTMLElement).getAttribute?.("style") === "") n.removeAttribute("style");
   });
   return nodes.length;
 }
@@ -112,4 +114,9 @@ h1>.pp-trans,h2>.pp-trans,h3>.pp-trans,h4>.pp-trans,h5>.pp-trans,h6>.pp-trans{fo
 [data-pp-pending]::after{content:"";display:inline-block;width:.8em;height:.8em;margin-left:.4em;vertical-align:-.1em;border-radius:50%;
  border:2px solid rgba(99,102,241,.25);border-top-color:rgba(99,102,241,.9);animation:pp-spin .8s linear infinite}
 @keyframes pp-spin{to{transform:rotate(360deg)}}
+html.pp-only [data-pp-done]{font-size:0!important}
+html.pp-only [data-pp-done]>.pp-trans{font-size:var(--pp-fs,16px)!important;margin:0}
+html.pp-only [data-pp-done]>:is(a,span,b,strong,em,i,u,small,sup,sub,mark,abbr,cite,q,time,font,s,del,ins,label,br,img):not(.pp-trans){display:none!important}
+.pp-failed .pp-retry{all:unset;cursor:pointer;font:500 12px/1.6 system-ui,sans-serif;color:#e11d48;border:1px solid rgba(225,29,72,.3);border-radius:8px;padding:0 8px}
+.pp-flash{outline:2px solid rgba(79,70,229,.55)!important;outline-offset:3px;border-radius:4px;background:rgba(99,102,241,.10)!important;transition:background .3s}
 `;

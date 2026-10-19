@@ -1,11 +1,13 @@
 import { makeBatches, shouldTranslate } from "@/src/lib/batch";
 import { extractPage } from "@/src/lib/extract";
+import { normalizeText } from "@/src/lib/hash";
+import { PageUi } from "@/src/lib/page-ui";
 import { collectParagraphs, insertTranslation, markPending, restoreOriginal, TRANSLATION_CSS } from "@/src/lib/paragraphs";
 import type { Settings, TranslateState } from "@/src/lib/types";
 
 /**
  * Injected on demand (chrome.scripting.executeScript) — never declared in the manifest.
- * It never sees API keys: it sends paragraph text to the service worker and receives translations.
+ * It never sees API keys: it sends text to the service worker and receives translations.
  */
 export default defineContentScript({
   matches: ["<all_urls>"],
@@ -25,9 +27,33 @@ export default defineContentScript({
     let inflight = 0;
     let flushTimer: number | undefined;
     let seen = new WeakSet<Element>();
+    const host = location.host;
+
+    const send = <T = unknown>(msg: Record<string, unknown>) =>
+      chrome.runtime.sendMessage(msg).then((r) => {
+        if (!r?.ok) throw new Error(r?.error ?? "后台无响应");
+        return r.data as T;
+      });
+
+    const ui = new PageUi({
+      onFabClick: () => send({ type: "translate:self-toggle" }).catch(() => {}),
+      onFabOpenPanel: () => send({ type: "panel:open" }).catch(() => {}),
+      onFabDismiss: () => ui.setFab(false),
+      translateSelection: async (text) => (await send<{ translation: string }>({ type: "translate:selection", text })).translation,
+      askInPanel: (text) => send({ type: "panel:ask", text }).catch(() => {}),
+    });
+
+    const applyConfig = (s: TSettings) => {
+      cfg = s;
+      const never = s.neverSites.includes(host);
+      ui.selectionEnabled = s.selectionTranslate && !never;
+      ui.setFab(s.floatingButton && !never, active);
+      document.documentElement.classList.toggle("pp-only", s.displayMode === "translation-only");
+    };
 
     const report = () => {
       state = { ...state, active };
+      ui.setFab(!!cfg?.floatingButton && !cfg.neverSites.includes(host), active);
       chrome.runtime.sendMessage({ type: "translate:state", state }).catch(() => {});
     };
 
@@ -39,6 +65,7 @@ export default defineContentScript({
       st.textContent = TRANSLATION_CSS;
       (document.head ?? document.documentElement).appendChild(st);
     };
+    ensureStyle();
 
     const isVisible = (el: Element) => {
       const r = (el as HTMLElement).getBoundingClientRect?.();
@@ -63,19 +90,17 @@ export default defineContentScript({
       if (!cfg) return;
       const text = collectParagraphs(el, { skipSelectors: cfg.skipSelectors }).find((p) => p.el === el)?.text;
       if (!text) return;
+      el.querySelectorAll(":scope > .pp-failed").forEach((n) => n.remove());
       markPending(el, true);
       queue.push({ el, text });
       clearTimeout(flushTimer);
       flushTimer = window.setTimeout(pump, 60);
     }
 
-    async function pump() {
+    function pump() {
       if (!cfg || !active) return;
       while (inflight < cfg.concurrency && queue.length) {
-        const [batch] = makeBatches(
-          queue.map((q, i) => ({ id: i, text: q.text })),
-          { maxChars: cfg.batchMaxChars, maxItems: cfg.batchMaxItems },
-        );
+        const [batch] = makeBatches(queue.map((q, i) => ({ id: i, text: q.text })), { maxChars: cfg.batchMaxChars, maxItems: cfg.batchMaxItems });
         const items = queue.splice(0, batch.length);
         inflight++;
         runBatch(items).finally(() => {
@@ -85,20 +110,41 @@ export default defineContentScript({
       }
     }
 
+    function markFailed(el: Element) {
+      const span = document.createElement("span");
+      span.className = "pp-trans pp-failed";
+      span.setAttribute("data-pp-ui", "");
+      const b = document.createElement("button");
+      b.className = "pp-retry";
+      b.textContent = "翻译失败 · 重试";
+      b.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        state.errors = Math.max(0, state.errors - 1);
+        enqueue(el);
+      });
+      span.appendChild(b);
+      el.appendChild(span);
+    }
+
     async function runBatch(items: { el: Element; text: string }[]) {
       try {
-        const res = await chrome.runtime.sendMessage({ type: "translate:batch", texts: items.map((i) => i.text) });
-        if (!res?.ok) throw new Error(res?.error ?? "翻译失败");
+        const data = await send<string[]>({ type: "translate:batch", texts: items.map((i) => i.text) });
         if (!active) return;
-        (res.data as string[]).forEach((t, i) => {
-          markPending(items[i].el, false);
-          if (t) insertTranslation(items[i].el, t, { lang: cfg!.targetLang, style: cfg!.style });
+        data.forEach((t, i) => {
+          const el = items[i].el as HTMLElement;
+          markPending(el, false);
+          if (t) {
+            el.style.setProperty("--pp-fs", getComputedStyle(el).fontSize);
+            insertTranslation(el, t, { lang: cfg!.targetLang, style: cfg!.style });
+          }
           state.done++;
         });
       } catch (e) {
+        if (!active) return;
         items.forEach((i) => {
           markPending(i.el, false);
-          seen.delete(i.el); // allow retry on the next toggle
+          markFailed(i.el);
         });
         state.errors += items.length;
         state.lastError = (e as Error).message;
@@ -107,10 +153,9 @@ export default defineContentScript({
     }
 
     function start(s: TSettings) {
-      cfg = s;
+      applyConfig(s);
       active = true;
       state = { active: true, total: 0, done: 0, errors: 0 };
-      ensureStyle();
       io = new IntersectionObserver(
         (entries) => {
           for (const e of entries)
@@ -130,7 +175,7 @@ export default defineContentScript({
             m.addedNodes.forEach((n) => {
               if (n.nodeType !== 1) return;
               const el = n as Element;
-              if (el.closest("[data-pp-ui]") || el.classList?.contains("pp-trans")) return;
+              if (el.closest("[data-pp-ui]") || el.classList?.contains("pp-trans") || el.tagName === "PAGEPILOT-UI") return;
               pending.push(el);
             });
           if (!pending.length) return;
@@ -157,9 +202,31 @@ export default defineContentScript({
       report();
     }
 
+    /** Scroll to and flash the block containing a verbatim excerpt (answer citations). */
+    function locate(excerpt: string): boolean {
+      const needle = normalizeText(excerpt).replace(/^["“'「]+|["”'」.。…]+$/g, "").toLowerCase();
+      if (needle.length < 4) return false;
+      const probes = [needle, needle.slice(0, 48), needle.slice(0, 24)];
+      const blocks = collectParagraphs(document.body, {});
+      for (const probe of probes) {
+        const hit = blocks.find((b) => b.text.toLowerCase().includes(probe)) ?? [...document.querySelectorAll(".pp-trans")].map((el) => ({ el: el.parentElement!, text: el.textContent ?? "" })).find((b) => normalizeText(b.text).toLowerCase().includes(probe));
+        if (hit) {
+          hit.el.scrollIntoView({ behavior: "smooth", block: "center" });
+          hit.el.classList.add("pp-flash");
+          setTimeout(() => hit.el.classList.remove("pp-flash"), 2000);
+          return true;
+        }
+      }
+      return false;
+    }
+
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       switch (msg?.type) {
         case "pp:ping":
+          sendResponse({ ok: true });
+          return;
+        case "pp:config":
+          applyConfig(msg.settings);
           sendResponse({ ok: true });
           return;
         case "translate:toggle": {
@@ -174,6 +241,13 @@ export default defineContentScript({
           return;
         case "page:extract":
           sendResponse(extractPage(document));
+          return;
+        case "page:locate":
+          sendResponse({ found: locate(String(msg.text ?? "")) });
+          return;
+        case "selection:show":
+          ui.showCard(String(msg.text ?? ""));
+          sendResponse({ ok: true });
           return;
       }
     });
