@@ -1,3 +1,5 @@
+// NOTE: public/icon/*.png are now the designer's hand-tuned exports (/workspace/sidekick-logo); running this
+// overwrites them with a plain render of public/icon.svg. Only use it as a fallback.
 // Renders public/icon.svg to public/icon/{16,32,48,128}.png with headless Chromium (Playwright).
 import { chromium } from "@playwright/test";
 import { readFileSync } from "node:fs";
