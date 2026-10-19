@@ -1,6 +1,6 @@
 import type { ChatTurn, PortEvent, PortRequest } from "@/src/lib/types";
 
-export const LLM_PORT = "pagepilot-llm";
+export const LLM_PORT = "sidekick-llm";
 
 export async function bg<T = unknown>(msg: Record<string, unknown>): Promise<T> {
   const res = await chrome.runtime.sendMessage(msg);

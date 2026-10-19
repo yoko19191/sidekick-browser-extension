@@ -8,7 +8,7 @@ import { langName, loadSettings } from "@/src/lib/settings";
 import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib/types";
 
 declare const __E2E__: boolean;
-export const LLM_PORT = "pagepilot-llm";
+export const LLM_PORT = "sidekick-llm";
 
 export default defineBackground({
   type: "module",

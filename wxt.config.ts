@@ -1,9 +1,9 @@
 import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
 
-// E2E builds (PAGEPILOT_E2E=1) add a host permission for the local fixture server only,
+// E2E builds (SIDEKICK_E2E=1) add a host permission for the local fixture server only,
 // because Playwright cannot click Chrome's permission prompt. Production builds never include it.
-const E2E = process.env.PAGEPILOT_E2E === "1";
+const E2E = process.env.SIDEKICK_E2E === "1";
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
@@ -18,16 +18,17 @@ export default defineConfig({
     },
   },
   manifest: {
-    name: "PagePilot",
-    description: "AI side panel: bilingual web translation and page summaries with your own API key.",
-    default_locale: undefined,
+    name: "__MSG_extName__",
+    short_name: "__MSG_extShortName__",
+    description: "__MSG_extDescription__",
+    default_locale: "zh_CN",
     permissions: ["sidePanel", "storage", "activeTab", "scripting", "contextMenus"],
     optional_host_permissions: ["<all_urls>"],
-    action: { default_title: "打开 PagePilot" },
+    action: { default_title: "__MSG_actionTitle__" },
     commands: {
       "toggle-translate": {
         suggested_key: { default: "Alt+A" },
-        description: "翻译当前页面 / 显示原文",
+        description: "__MSG_cmdToggleTranslate__",
       },
     },
     minimum_chrome_version: "116",

@@ -21,7 +21,7 @@ export function toPiModel(p: ProviderConfig, modelId: string): Model<Api> {
     id: modelId,
     name: modelId,
     api: API_OF[p.kind],
-    provider: `pagepilot-${p.presetId}`,
+    provider: `sidekick-${p.presetId}`,
     baseUrl: normalizeBaseUrl(p.baseUrl),
     reasoning: /reason|thinking|r1\b|o\d/i.test(modelId),
     input: ["text"],

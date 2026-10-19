@@ -13,9 +13,9 @@ export default defineContentScript({
   matches: ["<all_urls>"],
   registration: "runtime",
   main() {
-    const w = window as unknown as { __pagepilot?: boolean };
-    if (w.__pagepilot) return;
-    w.__pagepilot = true;
+    const w = window as unknown as { __sidekick?: boolean };
+    if (w.__sidekick) return;
+    w.__sidekick = true;
 
     type TSettings = Settings["translation"];
     let cfg: TSettings | null = null;
@@ -175,7 +175,7 @@ export default defineContentScript({
             m.addedNodes.forEach((n) => {
               if (n.nodeType !== 1) return;
               const el = n as Element;
-              if (el.closest("[data-pp-ui]") || el.classList?.contains("pp-trans") || el.tagName === "PAGEPILOT-UI") return;
+              if (el.closest("[data-pp-ui]") || el.classList?.contains("pp-trans") || el.tagName === "SIDEKICK-UI") return;
               pending.push(el);
             });
           if (!pending.length) return;

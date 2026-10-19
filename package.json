@@ -1,6 +1,6 @@
 {
-  "name": "pagepilot",
-  "description": "PagePilot – AI side panel for bilingual web translation and page summaries (BYOK)",
+  "name": "sidekick-extension",
+  "description": "翻翻 Sidekick – AI side panel for bilingual web translation and page summaries (BYOK)",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,9 +11,10 @@
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "vitest run",
-    "build:e2e": "PAGEPILOT_E2E=1 wxt build",
+    "build:e2e": "SIDEKICK_E2E=1 wxt build",
     "test:e2e": "npm run build:e2e && playwright test",
-    "check:permissions": "node scripts/check-permissions.mjs"
+    "check:permissions": "node scripts/check-permissions.mjs",
+    "screenshots": "npm run build:e2e && playwright test -c playwright.shots.config.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^1.3.0",

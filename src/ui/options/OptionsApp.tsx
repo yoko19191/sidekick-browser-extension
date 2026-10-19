@@ -41,7 +41,7 @@ export function OptionsApp() {
           <div className="mb-6 flex items-center gap-2.5 px-2">
             <Logo size={28} />
             <div>
-              <div className="text-[15px] font-semibold tracking-tight">PagePilot</div>
+              <div className="text-[15px] font-semibold tracking-tight">{chrome.i18n.getMessage("brandHeader") || "翻翻 Sidekick"}</div>
               <div className="text-[11.5px] text-muted-foreground">设置 · v{chrome.runtime.getManifest().version}</div>
             </div>
           </div>
@@ -397,17 +397,17 @@ function DataSection({ update }: Ctx) {
   }, []);
   const exportSettings = async () => {
     const { settings, providers } = await chrome.storage.local.get(["settings", "providers"]);
-    const blob = new Blob([JSON.stringify({ app: "pagepilot", version: 1, settings, providers }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ app: "sidekick", version: 1, settings, providers }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "pagepilot-settings.json";
+    a.download = "sidekick-settings.json";
     a.click();
     toast({ text: "已导出（不包含 API Key）", tone: "info" });
   };
   const importSettings = async (f: File) => {
     try {
       const j = JSON.parse(await f.text());
-      if (j.app !== "pagepilot") throw new Error("不是 PagePilot 的设置文件");
+      if (j.app !== "sidekick") throw new Error("不是翻翻的设置文件");
       await chrome.storage.local.set({ ...(j.settings ? { settings: j.settings } : {}), ...(Array.isArray(j.providers) ? { providers: j.providers } : {}) });
       toast({ text: "已导入，Key 需要重新填写", tone: "info" });
     } catch (e) {

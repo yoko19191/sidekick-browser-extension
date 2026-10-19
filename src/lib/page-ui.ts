@@ -63,7 +63,7 @@ export class PageUi {
   selectionEnabled = true;
 
   constructor(private h: PageUiHandlers) {
-    this.host = document.createElement("pagepilot-ui");
+    this.host = document.createElement("sidekick-ui");
     this.host.setAttribute("data-pp-ui", "");
     this.root = this.host.attachShadow({ mode: "open" });
     const st = document.createElement("style");

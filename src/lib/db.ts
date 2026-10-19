@@ -1,12 +1,12 @@
 import { openDB, type IDBPDatabase } from "idb";
 import type { ChatTurn } from "./types";
 
-export const DB_NAME = "pagepilot";
+export const DB_NAME = "sidekick";
 export const CACHE_STORE = "translation_cache";
 export const CONV_STORE = "conversations";
 export const GLOSSARY_STORE = "glossary"; // schema reserved for v2's glossary editor
 
-export function openPagePilotDB(name = DB_NAME): Promise<IDBPDatabase> {
+export function openSidekickDB(name = DB_NAME): Promise<IDBPDatabase> {
   return openDB(name, 2, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) db.createObjectStore(CACHE_STORE, { keyPath: "key" }).createIndex("lastUsed", "lastUsed");
@@ -31,7 +31,7 @@ export interface Conversation {
 export class ConversationStore {
   private dbp: Promise<IDBPDatabase>;
   constructor(dbName = DB_NAME) {
-    this.dbp = openPagePilotDB(dbName);
+    this.dbp = openSidekickDB(dbName);
   }
   async put(c: Conversation) {
     await (await this.dbp).put(CONV_STORE, c);

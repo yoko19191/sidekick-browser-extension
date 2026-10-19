@@ -1,5 +1,5 @@
 import type { IDBPDatabase } from "idb";
-import { CACHE_STORE, DB_NAME, openPagePilotDB } from "./db";
+import { CACHE_STORE, DB_NAME, openSidekickDB } from "./db";
 
 export interface CacheEntry {
   key: string;
@@ -15,7 +15,7 @@ export class TranslationCache {
   private dbp: Promise<IDBPDatabase>;
   /** Default 100k entries ≈ 50 MB at typical paragraph sizes (spec: LRU, ~50 MB). */
   constructor(public maxEntries = 100000, dbName = DB_NAME) {
-    this.dbp = openPagePilotDB(dbName);
+    this.dbp = openSidekickDB(dbName);
   }
 
   async getMany(keys: string[]): Promise<(string | undefined)[]> {
