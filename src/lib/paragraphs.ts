@@ -80,7 +80,7 @@ export function textTone(el: Element): "light" | "dark" {
     const x = Number(v) / 255;
     return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
   });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? "dark" : "light";
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "dark" : "light";
 }
 
 export function insertTranslation(el: Element, translation: string, opts: { lang: string; style: string }): HTMLElement {
