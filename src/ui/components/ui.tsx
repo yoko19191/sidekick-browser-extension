@@ -7,6 +7,7 @@ import { clsx, type ClassValue } from "clsx";
 import { Check, ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
 import { createContext, forwardRef, useCallback, useContext, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { twMerge } from "tailwind-merge";
+import { tr } from "@/src/i18n";
 
 export const cn = (...c: ClassValue[]) => twMerge(clsx(c));
 export const cx = cn;
@@ -162,14 +163,14 @@ export function TextField({ label, value, onChange, placeholder, type = "text", 
 }
 
 /** Level-3 options: collapsed by default and labelled "高级". */
-export function Advanced({ title = "高级", children, testId, defaultOpen = false }: { title?: string; children: ReactNode; testId?: string; defaultOpen?: boolean }) {
+export function Advanced({ title = tr("common.advanced"), children, testId, defaultOpen = false }: { title?: string; children: ReactNode; testId?: string; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="mt-3 rounded-card bg-card" data-testid={testId} data-open={open ? "" : undefined}>
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[13px] font-medium" aria-expanded={open}>
         <ChevronRight className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-90")} />
         <span className="flex-1">{title}</span>
-        <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground">高级</span>
+        <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground">{tr("common.advanced")}</span>
       </button>
       {open && <div className="animate-in border-t border-border/70 px-4 pb-4 pt-3">{children}</div>}
     </div>
@@ -239,7 +240,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <span className="min-w-0 flex-1 break-words">{t.text}</span>
               {t.sticky && <button className="text-muted-foreground hover:text-foreground" onClick={() => setItems((x) => x.filter((i) => i.id !== t.id))}>✕</button>}
             </div>
-            {t.detail && <details className="mt-1 text-[11.5px] text-muted-foreground"><summary className="cursor-pointer">详情</summary><div className="mt-1 break-all">{t.detail}</div></details>}
+            {t.detail && <details className="mt-1 text-[11.5px] text-muted-foreground"><summary className="cursor-pointer">{tr("common.details")}</summary><div className="mt-1 break-all">{t.detail}</div></details>}
           </div>
         ))}
       </div>

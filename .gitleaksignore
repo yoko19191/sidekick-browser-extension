@@ -1,0 +1,2 @@
+# Fake keys in the redaction unit test (tests/unit/keys.test.ts) — not real credentials.
+039c109e050694998f9e208aa05ccfef335a3222:tests/unit/keys.test.ts:generic-api-key:17

@@ -1,7 +1,8 @@
+import { tr } from "@/src/i18n";
 /** 翻翻 Sidekick mark: an original line over its (fainter) translations, plus a small AI spark. */
 export function Logo({ size = 26 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-label={chrome.i18n?.getMessage?.("brandHeader") || "翻翻 Sidekick"} role="img" className="shrink-0">
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-label={tr("brand.header")} role="img" className="shrink-0">
       <defs>
         <linearGradient id="sk-g" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#6366f1" />

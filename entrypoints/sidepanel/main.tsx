@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "@/src/ui/App";
 import "@/src/ui/styles.css";
+import { tr } from "@/src/i18n";
+
+document.title = tr("brand.name");
 
 declare const __E2E__: boolean;
 

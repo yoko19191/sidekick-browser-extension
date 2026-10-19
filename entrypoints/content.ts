@@ -4,6 +4,7 @@ import { normalizeText } from "@/src/lib/hash";
 import { PageUi } from "@/src/lib/page-ui";
 import { collectParagraphs, insertTranslation, markPending, restoreOriginal, TRANSLATION_CSS } from "@/src/lib/paragraphs";
 import type { Settings, TranslateState } from "@/src/lib/types";
+import { tr } from "@/src/i18n";
 
 /**
  * Injected on demand (chrome.scripting.executeScript) — never declared in the manifest.
@@ -31,7 +32,7 @@ export default defineContentScript({
 
     const send = <T = unknown>(msg: Record<string, unknown>) =>
       chrome.runtime.sendMessage(msg).then((r) => {
-        if (!r?.ok) throw new Error(r?.error ?? "后台无响应");
+        if (!r?.ok) throw new Error(r?.error ?? tr("common.noResponse"));
         return r.data as T;
       });
 
@@ -41,7 +42,7 @@ export default defineContentScript({
       send<{ opened: boolean }>(msg)
         .then((r) => r.opened)
         .catch(() => false)
-        .then((ok) => ok || ui.toast("点工具栏的翻翻图标继续"));
+        .then((ok) => ok || ui.toast(tr("page.openPanelFallback")));
 
     const ui = new PageUi({
       onFabClick: () => send({ type: "translate:self-toggle" }).catch(() => {}),
@@ -124,7 +125,7 @@ export default defineContentScript({
       span.setAttribute("data-pp-ui", "");
       const b = document.createElement("button");
       b.className = "pp-retry";
-      b.textContent = "翻译失败 · 重试";
+      b.textContent = tr("page.retryFailed");
       b.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();

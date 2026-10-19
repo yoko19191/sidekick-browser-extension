@@ -9,6 +9,7 @@ import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthr
 import { streamSimple as geminiStream } from "@earendil-works/pi-ai/api/google-generative-ai";
 import { normalizeBaseUrl, redactSecrets } from "./providers";
 import type { ChatTurn, ProviderConfig, ProviderKind } from "./types";
+import { tr } from "@/src/i18n";
 
 const API_OF: Record<ProviderKind, Api> = {
   "openai-compatible": "openai-completions",
@@ -90,7 +91,7 @@ export async function streamText(
       toolCalls.push(ev.toolCall);
     } else if (ev.type === "error") {
       if (ev.reason === "aborted") throw new DOMException("aborted", "AbortError");
-      throw new Error(redactSecrets(ev.error.errorMessage || "模型请求失败", [args.apiKey]));
+      throw new Error(redactSecrets(ev.error.errorMessage || tr("err.requestFailed"), [args.apiKey]));
     } else if (ev.type === "done") {
       return { text, stopReason: ev.reason, toolCalls };
     }
@@ -134,7 +135,7 @@ export async function testConnection(p: ProviderConfig, modelId: string | undefi
     listError = (e as Error).message;
   }
   const target = modelId ?? models[0] ?? p.models[0];
-  if (!target) throw new Error(listError ?? "没有可测试的模型");
+  if (!target) throw new Error(listError ?? tr("err.noTestModel"));
   // A tiny completion verifies the key + model actually work.
   const r = await streamText({ provider: p, modelId: target, apiKey, messages: [{ role: "user", content: "Reply with: ok" }], maxTokens: 16, signal: AbortSignal.timeout(30000) });
   return { ok: true, latencyMs: Date.now() - t0, model: target, reply: r.text.slice(0, 40), models, listError };

@@ -1,5 +1,6 @@
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { tr } from "@/src/i18n";
 
 /**
  * Markdown renderer for MODEL OUTPUT. Model output is untrusted (a page can prompt-inject the model), so nothing in
@@ -19,7 +20,7 @@ export function safeUrl(url: string): string {
 const components: Components = {
   img: ({ src, alt }) => {
     const href = typeof src === "string" ? safeUrl(src) : "";
-    const label = `🖼 ${alt?.trim() || "图片"}`;
+    const label = `🖼 ${alt?.trim() || tr("chat.imageFallback")}`;
     return href ? (
       <a href={href} target="_blank" rel="noreferrer noopener" className="md-img-link" data-testid="md-image-link" title={href}>
         {label}

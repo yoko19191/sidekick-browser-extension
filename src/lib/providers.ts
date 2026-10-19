@@ -1,4 +1,5 @@
 import type { ModelRef, ProviderConfig, ProviderKind } from "./types";
+import { tr } from "@/src/i18n";
 
 export interface ProviderPreset {
   id: string;
@@ -14,14 +15,14 @@ export interface ProviderPreset {
 export const PRESETS: ProviderPreset[] = [
   { id: "deepseek", name: "DeepSeek", kind: "openai-compatible", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys" },
   { id: "openai", name: "OpenAI", kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"], keyUrl: "https://platform.openai.com/api-keys" },
-  { id: "moonshot", name: "Kimi（月之暗面）", kind: "openai-compatible", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys" },
-  { id: "qwen", name: "通义千问", kind: "openai-compatible", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-plus", "qwen-turbo", "qwen-max"], keyUrl: "https://bailian.console.aliyun.com/" },
-  { id: "zhipu", name: "智谱 GLM", kind: "openai-compatible", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4-flash", "glm-4-plus"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
+  { id: "moonshot", name: tr("preset.moonshot"), kind: "openai-compatible", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys" },
+  { id: "qwen", name: tr("preset.qwen"), kind: "openai-compatible", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-plus", "qwen-turbo", "qwen-max"], keyUrl: "https://bailian.console.aliyun.com/" },
+  { id: "zhipu", name: tr("preset.zhipu"), kind: "openai-compatible", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4-flash", "glm-4-plus"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
   { id: "openrouter", name: "OpenRouter", kind: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", models: ["openai/gpt-4o-mini", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys" },
   { id: "anthropic", name: "Anthropic", kind: "anthropic", baseUrl: "https://api.anthropic.com", models: ["claude-sonnet-4-5", "claude-haiku-4-5"], keyUrl: "https://console.anthropic.com/settings/keys" },
   { id: "gemini", name: "Google Gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", models: ["gemini-2.5-flash", "gemini-2.5-pro"], keyUrl: "https://aistudio.google.com/apikey" },
-  { id: "ollama", name: "Ollama（本地）", kind: "openai-compatible", baseUrl: "http://localhost:11434/v1", models: ["qwen2.5:7b"], keyOptional: true, hint: "本地模型无需 Key" },
-  { id: "custom", name: "自定义（OpenAI 兼容）", kind: "openai-compatible", baseUrl: "", models: [], hint: "填写任意 OpenAI 兼容接口的 Base URL" },
+  { id: "ollama", name: tr("preset.ollama"), kind: "openai-compatible", baseUrl: "http://localhost:11434/v1", models: ["qwen2.5:7b"], keyOptional: true, hint: tr("preset.ollamaHint") },
+  { id: "custom", name: tr("preset.custom"), kind: "openai-compatible", baseUrl: "", models: [], hint: tr("preset.customHint") },
 ];
 
 export const PROVIDERS_KEY = "providers";
@@ -131,11 +132,11 @@ export async function keyStatus(): Promise<Record<string, string>> {
 /** Turn provider / network errors into a readable reason (spec 3.5: key wrong / no balance / network). */
 export function friendlyError(raw: string): string {
   const m = raw || "";
-  if (/\b(401|403)\b|invalid[_ ]api[_ ]key|incorrect api key|unauthori[sz]ed|authentication/i.test(m)) return "API Key 无效或没有权限，请检查 Key 是否填对";
-  if (/\b402\b|insufficient|balance|quota|billing|余额/i.test(m)) return "账户余额不足或额度已用完";
-  if (/\b429\b|rate limit|too many requests/i.test(m)) return "请求过于频繁，请稍后再试";
-  if (/\b404\b|model.*(not exist|not found)|no such model/i.test(m)) return "地址或模型不存在，请检查 Base URL 和模型名";
-  if (/failed to fetch|networkerror|network error|ECONNREFUSED|ENOTFOUND|timed? ?out|aborted|load failed/i.test(m)) return "网络不通：无法连接到服务地址";
-  if (/\b5\d\d\b/.test(m)) return "服务商暂时不可用（5xx），请稍后再试";
-  return m.slice(0, 200) || "未知错误";
+  if (/\b(401|403)\b|invalid[_ ]api[_ ]key|incorrect api key|unauthori[sz]ed|authentication/i.test(m)) return tr("err.401");
+  if (/\b402\b|insufficient|balance|quota|billing|余额/i.test(m)) return tr("err.402");
+  if (/\b429\b|rate limit|too many requests/i.test(m)) return tr("err.429");
+  if (/\b404\b|model.*(not exist|not found)|no such model/i.test(m)) return tr("err.404");
+  if (/failed to fetch|networkerror|network error|ECONNREFUSED|ENOTFOUND|timed? ?out|aborted|load failed/i.test(m)) return tr("err.network");
+  if (/\b5\d\d\b/.test(m)) return tr("err.5xx");
+  return m.slice(0, 200) || tr("err.unknown");
 }

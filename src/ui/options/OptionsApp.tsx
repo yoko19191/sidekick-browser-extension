@@ -12,15 +12,16 @@ import { Advanced, Button, Card, cn, Dropdown, DropdownContent, DropdownItem, Dr
 import { Logo } from "../components/Logo";
 import { useProviders, useSettings, useTheme } from "../hooks";
 import { bg } from "../messaging";
+import { tr } from "@/src/i18n";
 
 type SectionId = "models" | "translation" | "chat" | "appearance" | "shortcuts" | "data";
 const SECTIONS: { id: SectionId; label: string; icon: typeof KeyRound }[] = [
-  { id: "models", label: "模型与密钥", icon: KeyRound },
-  { id: "translation", label: "翻译", icon: Languages },
-  { id: "chat", label: "对话与提示词", icon: MessageSquareText },
-  { id: "appearance", label: "外观", icon: Palette },
-  { id: "shortcuts", label: "快捷键", icon: Keyboard },
-  { id: "data", label: "数据与隐私", icon: ShieldCheck },
+  { id: "models", label: tr("nav.models"), icon: KeyRound },
+  { id: "translation", label: tr("nav.translation"), icon: Languages },
+  { id: "chat", label: tr("nav.chat"), icon: MessageSquareText },
+  { id: "appearance", label: tr("nav.appearance"), icon: Palette },
+  { id: "shortcuts", label: tr("nav.shortcuts"), icon: Keyboard },
+  { id: "data", label: tr("nav.data"), icon: ShieldCheck },
 ];
 
 type Ctx = { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ReturnType<typeof useProviders> };
@@ -41,8 +42,8 @@ export function OptionsApp() {
           <div className="mb-6 flex items-center gap-2.5 px-2">
             <Logo size={28} />
             <div>
-              <div className="text-[15px] font-semibold tracking-tight">{chrome.i18n.getMessage("brandHeader") || "翻翻 Sidekick"}</div>
-              <div className="text-[11.5px] text-muted-foreground">设置 · v{chrome.runtime.getManifest().version}</div>
+              <div className="text-[15px] font-semibold tracking-tight">{tr("brand.header")}</div>
+              <div className="text-[11.5px] text-muted-foreground">{tr("opt.settingsVersion")}{chrome.runtime.getManifest().version}</div>
             </div>
           </div>
           <div className="space-y-0.5 max-md:flex max-md:gap-1 max-md:space-y-0 max-md:overflow-x-auto">
@@ -83,41 +84,41 @@ function ModelsSection({ settings, update, providers }: Ctx) {
     await providers.save([...providers.providers, p]);
     setOpenId(p.id);
   };
-  const opts = [{ value: "auto", label: "自动（第一个可用模型）" }, ...providers.providers.filter((p) => p.enabled && usable(p)).flatMap((p) => p.models.map((m) => ({ value: modelRef(p.id, m), label: m, group: p.name })))];
+  const opts = [{ value: "auto", label: tr("opt.autoModel") }, ...providers.providers.filter((p) => p.enabled && usable(p)).flatMap((p) => p.models.map((m) => ({ value: modelRef(p.id, m), label: m, group: p.name })))];
   const task = (k: keyof Settings["models"], title: string, desc: string) => {
     const r = resolveModelRef(settings.models[k], providers.providers, usable);
     return (
-      <Row title={title} subtitle={r ? `当前：${r.provider.name} · ${r.modelId}` : desc} chevron={false}
+      <Row title={title} subtitle={r ? tr("opt.currentModel", { provider: r.provider.name, model: r.modelId }) : desc} chevron={false}
         right={<Select className="w-56" testId={`task-model-${k}`} value={opts.some((o) => o.value === settings.models[k]) ? settings.models[k] : "auto"} options={opts} onChange={(v) => update((s) => ({ ...s, models: { ...s.models, [k]: v as ModelRef } }))} />} />
     );
   };
   return (
     <>
       <div className="flex items-end justify-between">
-        <SectionLabel>模型服务</SectionLabel>
+        <SectionLabel>{tr("opt.providers")}</SectionLabel>
         <Dropdown>
-          <DropdownTrigger asChild><Button size="sm" icon={Plus} testId="add-provider" className="mb-2">添加服务</Button></DropdownTrigger>
+          <DropdownTrigger asChild><Button size="sm" icon={Plus} testId="add-provider" className="mb-2">{tr("opt.addProvider")}</Button></DropdownTrigger>
           <DropdownContent align="end">
-            <DropdownLabel>OpenAI 兼容</DropdownLabel>
+            <DropdownLabel>{tr("opt.openaiCompatible")}</DropdownLabel>
             {PRESETS.filter((p) => p.kind === "openai-compatible").map((p) => <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>{p.name}</DropdownItem>)}
-            <DropdownLabel>其他协议</DropdownLabel>
+            <DropdownLabel>{tr("opt.otherProtocols")}</DropdownLabel>
             {PRESETS.filter((p) => p.kind !== "openai-compatible").map((p) => <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>{p.name}</DropdownItem>)}
           </DropdownContent>
         </Dropdown>
       </div>
-      {providers.providers.length === 0 && <Card className="p-6 text-center text-[13px] text-muted-foreground">还没有添加模型服务。支持 OpenAI 兼容接口（DeepSeek、Kimi、通义、智谱、OpenRouter、Ollama…）、Anthropic 和 Gemini。</Card>}
+      {providers.providers.length === 0 && <Card className="p-6 text-center text-[13px] text-muted-foreground">{tr("opt.noProviders")}</Card>}
       <div className="space-y-2">
         {providers.providers.map((p) => (
           <ProviderCard key={p.id} p={p} masked={providers.masked[p.id]} open={openId === p.id} onToggle={() => setOpenId(openId === p.id ? null : p.id)} providers={providers} />
         ))}
       </div>
-      <SectionLabel>默认模型</SectionLabel>
+      <SectionLabel>{tr("opt.defaultModels")}</SectionLabel>
       <Group>
-        {task("chat", "对话", "未配置")}
-        {task("summary", "总结", "未配置")}
-        {task("translate", "翻译", "建议选便宜、快速的模型")}
+        {task("chat", tr("opt.taskChat"), tr("opt.notConfigured"))}
+        {task("summary", tr("opt.taskSummary"), tr("opt.notConfigured"))}
+        {task("translate", tr("opt.taskTranslate"), tr("opt.translateHint"))}
       </Group>
-      <Hint>默认都是“自动”：用第一个已填 Key 的服务的第一个模型。侧栏顶部的模型切换会同时改对话和总结。</Hint>
+      <Hint>{tr("opt.defaultModelsHint")}</Hint>
     </>
   );
 }
@@ -150,7 +151,7 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
     await setKey(p.id, key);
     try {
       const r = await bg<{ latencyMs: number; model: string; models: string[] }>({ type: "provider:test", provider: p, modelId: p.models[0] });
-      setTest({ state: "ok", msg: `连接成功 · ${r.model} · ${(r.latencyMs / 1000).toFixed(1)}s` });
+      setTest({ state: "ok", msg: tr("ob.testOk", { model: r.model, secs: (r.latencyMs / 1000).toFixed(1) }) });
       if (r.models?.length && !p.models.length) persist({ ...p, models: r.models.slice(0, 50) });
     } catch (e) {
       setTest({ state: "fail", msg: (e as Error).message });
@@ -163,9 +164,9 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
     try {
       const models = await bg<string[]>({ type: "provider:models", provider: p });
       if (models.length) persist({ ...p, models: [...new Set([...p.models.filter((m) => models.includes(m)), ...models])].slice(0, 80) });
-      toast({ text: `获取到 ${models.length} 个模型`, tone: "info" });
+      toast({ text: tr("opt.fetchedModels", { n: models.length }), tone: "info" });
     } catch (e) {
-      toast({ text: "获取模型列表失败", tone: "error", detail: (e as Error).message, sticky: true });
+      toast({ text: tr("opt.fetchModelsFailed"), tone: "error", detail: (e as Error).message, sticky: true });
     } finally {
       setFetching(false);
     }
@@ -177,21 +178,21 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
         <span className="grid size-8 place-items-center rounded-btn bg-background text-muted-foreground"><Icon className="size-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[14px] font-medium">{p.name}</div>
-          <div className="truncate text-[12px] text-muted-foreground" data-testid="provider-summary">{ok ? `${masked || "无需 Key"} · ${p.models.length} 个模型` : "未填写 API Key"}</div>
+          <div className="truncate text-[12px] text-muted-foreground" data-testid="provider-summary">{ok ? tr("opt.providerSummary", { key: masked || tr("opt.noKeyNeeded"), n: p.models.length }) : tr("opt.noKey")}</div>
         </div>
         <span className={cn("size-2 rounded-full", ok && p.enabled ? "bg-emerald-500" : "bg-input")} />
         <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <div className="animate-in space-y-4 border-t border-border/70 px-4 pb-4 pt-4">
-          <TextField label="API Key" testId="api-key" type={show ? "text" : "password"} mono value={key} placeholder={preset?.keyOptional ? "可留空" : "sk-…"}
+          <TextField label="API Key" testId="api-key" type={show ? "text" : "password"} mono value={key} placeholder={preset?.keyOptional ? tr("common.optional") : "sk-…"}
             onChange={(v) => { setKeyInput(v); clearTimeout(keyTimer.current); keyTimer.current = window.setTimeout(() => setKey(p.id, v), 400); }}
-            hint={preset?.keyUrl && <a className="text-primary hover:underline" href={preset.keyUrl} target="_blank" rel="noreferrer">获取 Key</a>}
-            right={<Button variant="ghost" size="icon" onClick={() => setShow((v) => !v)} aria-label={show ? "隐藏" : "显示"}>{show ? <EyeOff /> : <Eye />}</Button>} />
+            hint={preset?.keyUrl && <a className="text-primary hover:underline" href={preset.keyUrl} target="_blank" rel="noreferrer">{tr("opt.getKey")}</a>}
+            right={<Button variant="ghost" size="icon" onClick={() => setShow((v) => !v)} aria-label={show ? tr("common.hide") : tr("common.show")}>{show ? <EyeOff /> : <Eye />}</Button>} />
           <TextField label="Base URL" testId="base-url" mono value={p.baseUrl} placeholder="https://api.example.com/v1" onChange={(v) => persist({ ...p, baseUrl: v })} />
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" testId="test-provider" onClick={runTest} disabled={test.state === "running" || (!key && !preset?.keyOptional)} icon={test.state === "running" ? Loader2 : Zap} className={test.state === "running" ? "[&_svg]:animate-spin" : ""}>测试连接</Button>
-            <Button variant="ghost" testId="fetch-models" onClick={fetchModels} icon={RefreshCw} className={fetching ? "[&_svg]:animate-spin" : ""}>从服务商获取模型</Button>
+            <Button variant="secondary" testId="test-provider" onClick={runTest} disabled={test.state === "running" || (!key && !preset?.keyOptional)} icon={test.state === "running" ? Loader2 : Zap} className={test.state === "running" ? "[&_svg]:animate-spin" : ""}>{tr("common.testConnection")}</Button>
+            <Button variant="ghost" testId="fetch-models" onClick={fetchModels} icon={RefreshCw} className={fetching ? "[&_svg]:animate-spin" : ""}>{tr("opt.fetchModels")}</Button>
           </div>
           {(test.state === "ok" || test.state === "fail") && (
             <div data-testid="test-result" className={cn("flex items-start gap-2 rounded-btn px-3 py-2 text-[12.5px]", test.state === "ok" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-destructive/10 text-destructive")}>
@@ -199,26 +200,26 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
               <span className="min-w-0 break-words">{test.msg}</span>
             </div>
           )}
-          <Field label={`模型（${p.models.length}）· 第一个为默认`}>
+          <Field label={tr("opt.modelsTitle", { n: p.models.length })}>
             <div className="max-h-56 overflow-y-auto rounded-card bg-background" data-testid="model-list">
               {p.models.map((m, i) => (
                 <div key={m} className={cn("group flex items-center gap-2 px-3 py-2", i > 0 && "border-t border-border/60")}>
                   <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{m}</span>
-                  {i > 0 && <button className="text-[11.5px] text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100" onClick={() => persist({ ...p, models: [m, ...p.models.filter((x) => x !== m)] })}>设为默认</button>}
-                  <button className="text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" aria-label="移除" onClick={() => persist({ ...p, models: p.models.filter((x) => x !== m) })}><X className="size-3.5" /></button>
+                  {i > 0 && <button className="text-[11.5px] text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100" onClick={() => persist({ ...p, models: [m, ...p.models.filter((x) => x !== m)] })}>{tr("opt.setDefault")}</button>}
+                  <button className="text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" aria-label={tr("common.remove")} onClick={() => persist({ ...p, models: p.models.filter((x) => x !== m) })}><X className="size-3.5" /></button>
                 </div>
               ))}
               <div className="flex gap-2 border-t border-border/60 p-2">
-                <input value={newModel} onChange={(e) => setNewModel(e.target.value)} placeholder="手动添加模型 ID" className="min-w-0 flex-1 bg-transparent px-1 font-mono text-[12.5px] outline-none placeholder:font-sans placeholder:text-muted-foreground/70" />
-                <Button size="sm" variant="secondary" icon={Plus} onClick={() => { if (newModel.trim()) { persist({ ...p, models: [...new Set([...p.models, newModel.trim()])] }); setNewModel(""); } }}>添加</Button>
+                <input value={newModel} onChange={(e) => setNewModel(e.target.value)} placeholder={tr("opt.addModelPlaceholder")} className="min-w-0 flex-1 bg-transparent px-1 font-mono text-[12.5px] outline-none placeholder:font-sans placeholder:text-muted-foreground/70" />
+                <Button size="sm" variant="secondary" icon={Plus} onClick={() => { if (newModel.trim()) { persist({ ...p, models: [...new Set([...p.models, newModel.trim()])] }); setNewModel(""); } }}>{tr("common.add")}</Button>
               </div>
             </div>
           </Field>
-          <Advanced title="更多选项">
+          <Advanced title={tr("opt.moreOptions")}>
             <div className="space-y-3">
-              <TextField label="显示名称" value={p.name} onChange={(v) => persist({ ...p, name: v })} />
-              <div className="flex items-center justify-between"><span className="text-[13px] font-medium">启用（关闭后不会被自动选用）</span><Switch checked={p.enabled} onChange={(v) => persist({ ...p, enabled: v })} /></div>
-              <Button variant="destructive" icon={Trash2} onClick={() => deleteProvider(p.id)}>删除此服务及其 Key</Button>
+              <TextField label={tr("opt.displayName")} value={p.name} onChange={(v) => persist({ ...p, name: v })} />
+              <div className="flex items-center justify-between"><span className="text-[13px] font-medium">{tr("opt.enabledHint")}</span><Switch checked={p.enabled} onChange={(v) => persist({ ...p, enabled: v })} /></div>
+              <Button variant="destructive" icon={Trash2} onClick={() => deleteProvider(p.id)}>{tr("opt.deleteProvider")}</Button>
             </div>
           </Advanced>
         </div>
@@ -232,7 +233,7 @@ function NumberField({ label, value, min, max, step = 1, onChange, def }: { labe
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-[12px] font-medium text-muted-foreground">
-        <span>{label}{def != null && <span className="ml-1 font-normal opacity-70">（默认 {def}）</span>}</span>
+        <span>{label}{def != null && <span className="ml-1 font-normal opacity-70">{tr("opt.defaultPrefix")} {def}{tr("opt.defaultSuffix")}</span>}</span>
         <span className="rounded-sm bg-background px-1.5 py-0.5 font-mono text-foreground">{value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-[var(--primary)]" />
@@ -253,7 +254,7 @@ function SiteList({ label, items, onChange, placeholder, testId }: { label: stri
         {items.map((h) => (
           <span key={h} className="flex items-center gap-1 rounded-sm bg-background px-2 py-1 font-mono text-[12px]">
             {h}
-            <button onClick={() => onChange(items.filter((x) => x !== h))} className="text-muted-foreground hover:text-destructive" aria-label="移除"><X className="size-3" /></button>
+            <button onClick={() => onChange(items.filter((x) => x !== h))} className="text-muted-foreground hover:text-destructive" aria-label={tr("common.remove")}><X className="size-3" /></button>
           </span>
         ))}
         <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addOne()} onBlur={addOne} placeholder={placeholder} className="min-w-32 flex-1 rounded-sm bg-background px-2 py-1 font-mono text-[12px] outline-none placeholder:font-sans placeholder:text-muted-foreground/70" />
@@ -268,14 +269,14 @@ function TranslationSection({ settings, update }: Ctx) {
   const set = (patch: Partial<Settings["translation"]>) => update((s) => ({ ...s, translation: { ...s.translation, ...patch } }));
   return (
     <>
-      <SectionLabel>基础</SectionLabel>
+      <SectionLabel>{tr("opt.basics")}</SectionLabel>
       <Group>
-        <Row title="目标语言" chevron={false} right={<Select className="w-44" testId="target-lang" value={t.targetLang} onChange={(v) => set({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />} />
-        <Row title="显示方式" chevron={false} right={<Segmented<DisplayMode> className="w-52" value={t.displayMode} onChange={(v) => set({ displayMode: v })} options={[{ value: "bilingual", label: "双语对照" }, { value: "translation-only", label: "仅译文" }]} />} />
-        <Row title="网页右侧悬浮按钮" subtitle="点一下切换翻译，右键或长按打开侧栏" chevron={false} right={<Switch testId="fab-switch" checked={t.floatingButton} onChange={(v) => set({ floatingButton: v })} />} />
-        <Row title="划词翻译" subtitle="选中文字后出现小图标，点开浮动卡片" chevron={false} right={<Switch checked={t.selectionTranslate} onChange={(v) => set({ selectionTranslate: v })} />} />
+        <Row title={tr("qs.targetLang")} chevron={false} right={<Select className="w-44" testId="target-lang" value={t.targetLang} onChange={(v) => set({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />} />
+        <Row title={tr("opt.displayMode")} chevron={false} right={<Segmented<DisplayMode> className="w-52" value={t.displayMode} onChange={(v) => set({ displayMode: v })} options={[{ value: "bilingual", label: tr("mode.bilingual") }, { value: "translation-only", label: tr("mode.only") }]} />} />
+        <Row title={tr("opt.fab")} subtitle={tr("opt.fabHint")} chevron={false} right={<Switch testId="fab-switch" checked={t.floatingButton} onChange={(v) => set({ floatingButton: v })} />} />
+        <Row title={tr("opt.selection")} subtitle={tr("opt.selectionHint")} chevron={false} right={<Switch checked={t.selectionTranslate} onChange={(v) => set({ selectionTranslate: v })} />} />
       </Group>
-      <SectionLabel>译文样式</SectionLabel>
+      <SectionLabel>{tr("opt.styleTitle")}</SectionLabel>
       <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-2" data-testid="style-grid">
         {(Object.keys(STYLE_LABELS) as TranslationStyle[]).map((st) => (
           <button key={st} onClick={() => set({ style: st })} data-testid={`style-${st}`}
@@ -286,20 +287,20 @@ function TranslationSection({ settings, update }: Ctx) {
           </button>
         ))}
       </div>
-      <Advanced title="批量、并发与站点规则" testId="translation-advanced">
+      <Advanced title={tr("opt.translationAdvanced")} testId="translation-advanced">
         <div className="space-y-4">
-          <NumberField label="每批最多字符" def={d.batchMaxChars} value={t.batchMaxChars} min={400} max={6000} step={100} onChange={(v) => set({ batchMaxChars: v })} />
-          <NumberField label="每批最多段落" def={d.batchMaxItems} value={t.batchMaxItems} min={1} max={50} onChange={(v) => set({ batchMaxItems: v })} />
-          <NumberField label="并发请求数" def={d.concurrency} value={t.concurrency} min={1} max={8} onChange={(v) => set({ concurrency: v })} />
-          <div className="flex items-center justify-between"><span className="text-[13px] font-medium">翻译动态加载的内容（无限滚动 / 单页应用）</span><Switch checked={t.autoTranslateDynamic} onChange={(v) => set({ autoTranslateDynamic: v })} /></div>
-          <div className="flex items-center justify-between"><span className="text-[13px] font-medium">使用翻译缓存</span><Switch checked={t.cacheEnabled} onChange={(v) => set({ cacheEnabled: v })} /></div>
-          <SiteList label="总是自动翻译的网站" testId="auto-sites" items={t.autoSites} onChange={(v) => set({ autoSites: v })} placeholder="example.com，回车添加" />
-          <SiteList label="永不翻译的网站（也不显示悬浮按钮）" items={t.neverSites} onChange={(v) => set({ neverSites: v })} placeholder="example.com，回车添加" />
-          <TextField label="排除元素（CSS 选择器）" mono value={t.skipSelectors} placeholder=".comments, footer" onChange={(v) => set({ skipSelectors: v })} />
-          <Field label="翻译提示词补充（术语、语气等）">
-            <textarea value={t.extraPrompt} onChange={(e) => set({ extraPrompt: e.target.value })} rows={3} placeholder="例如：LLM 译为“大语言模型”，保持口语化" className={cn(inputCls, "resize-y")} />
+          <NumberField label={tr("opt.batchChars")} def={d.batchMaxChars} value={t.batchMaxChars} min={400} max={6000} step={100} onChange={(v) => set({ batchMaxChars: v })} />
+          <NumberField label={tr("opt.batchItems")} def={d.batchMaxItems} value={t.batchMaxItems} min={1} max={50} onChange={(v) => set({ batchMaxItems: v })} />
+          <NumberField label={tr("opt.concurrency")} def={d.concurrency} value={t.concurrency} min={1} max={8} onChange={(v) => set({ concurrency: v })} />
+          <div className="flex items-center justify-between"><span className="text-[13px] font-medium">{tr("opt.dynamic")}</span><Switch checked={t.autoTranslateDynamic} onChange={(v) => set({ autoTranslateDynamic: v })} /></div>
+          <div className="flex items-center justify-between"><span className="text-[13px] font-medium">{tr("opt.useCache")}</span><Switch checked={t.cacheEnabled} onChange={(v) => set({ cacheEnabled: v })} /></div>
+          <SiteList label={tr("opt.autoSites")} testId="auto-sites" items={t.autoSites} onChange={(v) => set({ autoSites: v })} placeholder={tr("opt.sitePlaceholder")} />
+          <SiteList label={tr("opt.neverSites")} items={t.neverSites} onChange={(v) => set({ neverSites: v })} placeholder={tr("opt.sitePlaceholder")} />
+          <TextField label={tr("opt.skipSelectors")} mono value={t.skipSelectors} placeholder=".comments, footer" onChange={(v) => set({ skipSelectors: v })} />
+          <Field label={tr("opt.extraPrompt")}>
+            <textarea value={t.extraPrompt} onChange={(e) => set({ extraPrompt: e.target.value })} rows={3} placeholder={tr("opt.extraPromptPlaceholder")} className={cn(inputCls, "resize-y")} />
           </Field>
-          <Button variant="ghost" icon={RotateCcw} onClick={() => update((s) => ({ ...s, translation: { ...d, targetLang: s.translation.targetLang, style: s.translation.style, autoSites: s.translation.autoSites, neverSites: s.translation.neverSites } }))}>恢复默认（保留语言、样式和站点规则）</Button>
+          <Button variant="ghost" icon={RotateCcw} onClick={() => update((s) => ({ ...s, translation: { ...d, targetLang: s.translation.targetLang, style: s.translation.style, autoSites: s.translation.autoSites, neverSites: s.translation.neverSites } }))}>{tr("opt.resetTranslation")}</Button>
         </div>
       </Advanced>
     </>
@@ -310,7 +311,7 @@ function StylePreview({ style }: { style: TranslationStyle }) {
   const inner: Record<TranslationStyle, string> = { green: "text-[#16a34a] dark:text-[#34d399]", plain: "", dashed: "border-b-[1.5px] border-dashed border-primary", faded: "opacity-60", highlight: "bg-[linear-gradient(transparent_55%,rgba(253,224,71,.6)_55%)]", card: "" };
   return (
     <div className={cn("mt-0.5 text-[12.5px] leading-5", style === "card" && "rounded-[6px] border-l-2 border-primary bg-primary-soft px-1.5")}>
-      <span className={inner[style]}>敏捷的棕色狐狸。</span>
+      <span className={inner[style]}>{tr("opt.stylePreview")}</span>
     </div>
   );
 }
@@ -322,30 +323,30 @@ function ChatSection({ settings, update }: Ctx) {
   const setP = (patch: Partial<Settings["prompts"]>) => update((s) => ({ ...s, prompts: { ...s.prompts, ...patch } }));
   return (
     <>
-      <SectionLabel>总结</SectionLabel>
+      <SectionLabel>{tr("opt.summaryTitle")}</SectionLabel>
       <Group>
-        <Row title="篇幅" chevron={false} right={<Segmented<SummaryLength> className="w-52" value={sm.length} onChange={(v) => setS({ length: v })} options={[{ value: "short", label: "简短" }, { value: "medium", label: "适中" }, { value: "detailed", label: "详细" }]} />} />
-        <Row title="总结语言" chevron={false} right={<Select className="w-44" value={sm.language} onChange={(v) => setS({ language: v })} options={[{ value: "target", label: "同翻译目标语言" }, { value: "page", label: "与页面相同" }, ...LANGUAGES.map((l) => ({ value: l.code, label: l.label }))]} />} />
+        <Row title={tr("opt.summaryLength")} chevron={false} right={<Segmented<SummaryLength> className="w-52" value={sm.length} onChange={(v) => setS({ length: v })} options={[{ value: "short", label: tr("len.short") }, { value: "medium", label: tr("len.medium") }, { value: "detailed", label: tr("len.long") }]} />} />
+        <Row title={tr("opt.summaryLang")} chevron={false} right={<Select className="w-44" value={sm.language} onChange={(v) => setS({ language: v })} options={[{ value: "target", label: tr("opt.summaryLangTarget") }, { value: "page", label: tr("opt.summaryLangPage") }, ...LANGUAGES.map((l) => ({ value: l.code, label: l.label }))]} />} />
       </Group>
-      <Hint>超过 2 万字的长文会自动分段总结再合并。回答里的脚注引用可以点击，定位到网页原文。</Hint>
-      <Advanced title="提示词模板" testId="prompt-templates">
+      <Hint>{tr("opt.summaryHint")}</Hint>
+      <Advanced title={tr("opt.promptTemplates")} testId="prompt-templates">
         <div className="space-y-4">
-          <Field label="总结本页" hint={<button className="text-primary" onClick={() => setP({ summary: "" })}>恢复默认</button>}>
+          <Field label={tr("chat.summarizePage")} hint={<button className="text-primary" onClick={() => setP({ summary: "" })}>{tr("common.resetDefault")}</button>}>
             <textarea rows={3} value={settings.prompts.summary} placeholder={DEFAULT_SUMMARY_TEMPLATE[sm.length]} onChange={(e) => setP({ summary: e.target.value })} className={cn(inputCls, "resize-y")} />
           </Field>
-          <Field label="提取要点" hint={<button className="text-primary" onClick={() => setP({ keyPoints: "" })}>恢复默认</button>}>
+          <Field label={tr("chat.keyPoints")} hint={<button className="text-primary" onClick={() => setP({ keyPoints: "" })}>{tr("common.resetDefault")}</button>}>
             <textarea rows={2} value={settings.prompts.keyPoints} placeholder={DEFAULT_KEYPOINTS_TEMPLATE} onChange={(e) => setP({ keyPoints: e.target.value })} className={cn(inputCls, "resize-y")} />
           </Field>
-          <Field label="对话偏好（附加到系统提示词）">
-            <textarea rows={2} value={settings.prompts.chatSystem} placeholder="例如：回答尽量简短，多用表格" onChange={(e) => setP({ chatSystem: e.target.value })} className={cn(inputCls, "resize-y")} />
+          <Field label={tr("opt.chatSystem")}>
+            <textarea rows={2} value={settings.prompts.chatSystem} placeholder={tr("opt.chatSystemPlaceholder")} onChange={(e) => setP({ chatSystem: e.target.value })} className={cn(inputCls, "resize-y")} />
           </Field>
         </div>
       </Advanced>
-      <Advanced title="生成参数">
+      <Advanced title={tr("opt.genParams")}>
         <div className="space-y-4">
-          <NumberField label="页面内容上限（字符）" def={48000} value={sm.maxContextChars} min={8000} max={200000} step={4000} onChange={(v) => setS({ maxContextChars: v })} />
-          <NumberField label="温度" def={0.3} value={settings.chat.temperature} min={0} max={1.5} step={0.1} onChange={(v) => update((s) => ({ ...s, chat: { ...s.chat, temperature: Math.round(v * 10) / 10 } }))} />
-          <NumberField label="最大输出 tokens" def={4096} value={settings.chat.maxTokens} min={512} max={16384} step={512} onChange={(v) => update((s) => ({ ...s, chat: { ...s.chat, maxTokens: v } }))} />
+          <NumberField label={tr("opt.maxContext")} def={48000} value={sm.maxContextChars} min={8000} max={200000} step={4000} onChange={(v) => setS({ maxContextChars: v })} />
+          <NumberField label={tr("opt.temperature")} def={0.3} value={settings.chat.temperature} min={0} max={1.5} step={0.1} onChange={(v) => update((s) => ({ ...s, chat: { ...s.chat, temperature: Math.round(v * 10) / 10 } }))} />
+          <NumberField label={tr("opt.maxTokens")} def={4096} value={settings.chat.maxTokens} min={512} max={16384} step={512} onChange={(v) => update((s) => ({ ...s, chat: { ...s.chat, maxTokens: v } }))} />
         </div>
       </Advanced>
     </>
@@ -356,12 +357,12 @@ function ChatSection({ settings, update }: Ctx) {
 function AppearanceSection({ settings, update }: Ctx) {
   return (
     <>
-      <SectionLabel>主题</SectionLabel>
+      <SectionLabel>{tr("opt.theme")}</SectionLabel>
       <Card className="p-4">
         <Segmented<ThemeMode> testId="theme" value={settings.theme} onChange={(v) => update((s) => ({ ...s, theme: v }))}
-          options={[{ value: "system", label: "跟随系统", icon: Monitor }, { value: "light", label: "浅色", icon: Sun }, { value: "dark", label: "深色", icon: Moon }]} />
+          options={[{ value: "system", label: tr("theme.system"), icon: Monitor }, { value: "light", label: tr("theme.light"), icon: Sun }, { value: "dark", label: tr("theme.dark"), icon: Moon }]} />
       </Card>
-      <Hint>默认跟随系统。侧栏、设置页和网页上的浮动卡片使用同一套配色。</Hint>
+      <Hint>{tr("opt.themeHint")}</Hint>
     </>
   );
 }
@@ -371,15 +372,15 @@ function ShortcutsSection() {
   useEffect(() => void chrome.commands.getAll().then(setCmds), []);
   return (
     <>
-      <SectionLabel>快捷键</SectionLabel>
+      <SectionLabel>{tr("nav.shortcuts")}</SectionLabel>
       <Group>
-        <Row title="打开侧栏" subtitle="点击工具栏图标" chevron={false} />
+        <Row title={tr("opt.openPanel")} subtitle={tr("opt.clickToolbar")} chevron={false} />
         {cmds.filter((c) => c.name !== "_execute_action").map((c) => (
-          <Row key={c.name} title={c.description || c.name} chevron={false} right={<kbd className="rounded-sm bg-background px-2 py-1 font-mono text-[12px]">{c.shortcut || "未设置"}</kbd>} />
+          <Row key={c.name} title={c.description || c.name} chevron={false} right={<kbd className="rounded-sm bg-background px-2 py-1 font-mono text-[12px]">{c.shortcut || tr("opt.notSet")}</kbd>} />
         ))}
-        <Row title="右键菜单" subtitle="翻译此页 / 翻译选中文字 / 在侧栏总结此页" chevron={false} />
+        <Row title={tr("opt.contextMenu")} subtitle={tr("opt.contextMenuItems")} chevron={false} />
       </Group>
-      <Button variant="secondary" className="mt-3" icon={Keyboard} onClick={() => chrome.tabs.create({ url: "chrome://extensions/shortcuts" })}>在 Chrome 中修改快捷键</Button>
+      <Button variant="secondary" className="mt-3" icon={Keyboard} onClick={() => chrome.tabs.create({ url: "chrome://extensions/shortcuts" })}>{tr("opt.editShortcuts")}</Button>
     </>
   );
 }
@@ -402,50 +403,50 @@ function DataSection({ update }: Ctx) {
     a.href = URL.createObjectURL(blob);
     a.download = "sidekick-settings.json";
     a.click();
-    toast({ text: "已导出（不包含 API Key）", tone: "info" });
+    toast({ text: tr("opt.exported"), tone: "info" });
   };
   const importSettings = async (f: File) => {
     try {
       const j = JSON.parse(await f.text());
-      if (j.app !== "sidekick") throw new Error("不是翻翻的设置文件");
+      if (j.app !== "sidekick") throw new Error(tr("opt.notSettingsFile"));
       await chrome.storage.local.set({ ...(j.settings ? { settings: j.settings } : {}), ...(Array.isArray(j.providers) ? { providers: j.providers } : {}) });
-      toast({ text: "已导入，Key 需要重新填写", tone: "info" });
+      toast({ text: tr("opt.imported"), tone: "info" });
     } catch (e) {
-      toast({ text: `导入失败：${(e as Error).message}`, tone: "error" });
+      toast({ text: tr("opt.importFailed", { error: (e as Error).message }), tone: "error" });
     }
   };
   return (
     <>
-      <SectionLabel>隐私</SectionLabel>
+      <SectionLabel>{tr("opt.privacy")}</SectionLabel>
       <Card className="space-y-2 p-4 text-[13px] leading-6 text-muted-foreground">
-        <p className="flex gap-2"><ShieldCheck className="mt-1 size-4 shrink-0 text-primary" />没有服务器：网页内容只发给你自己配置的模型服务商。</p>
-        <p className="flex gap-2"><KeyRound className="mt-1 size-4 shrink-0 text-primary" />API Key 只存在本机 chrome.storage.local（不同步），只有扩展后台能读取，网页和内容脚本拿不到。</p>
+        <p className="flex gap-2"><ShieldCheck className="mt-1 size-4 shrink-0 text-primary" />{tr("opt.privacyNoServer")}</p>
+        <p className="flex gap-2"><KeyRound className="mt-1 size-4 shrink-0 text-primary" />{tr("opt.privacyKeys")}</p>
       </Card>
-      <SectionLabel>网站访问</SectionLabel>
+      <SectionLabel>{tr("opt.siteAccess")}</SectionLabel>
       <Group>
-        <Row icon={Globe2} title="允许在所有网站上运行" subtitle={all ? "已授权：悬浮按钮、划词翻译、自动翻译在所有网站可用" : "未授权时，只在你点击扩展图标、右键菜单或快捷键后对当前页生效"} chevron={false}
+        <Row icon={Globe2} title={tr("opt.allSites")} subtitle={all ? tr("opt.allSitesOn") : tr("opt.allSitesOff")} chevron={false}
           right={<Switch testId="all-sites" checked={all} onChange={async (v) => setAll(v ? await chrome.permissions.request({ origins: ["<all_urls>"] }) : !(await chrome.permissions.remove({ origins: ["<all_urls>"] })))} />} />
       </Group>
-      <Advanced title="缓存、导入导出与重置" testId="data-advanced">
+      <Advanced title={tr("opt.dataAdvanced")} testId="data-advanced">
         <div className="space-y-2">
-          <Row className="px-0" icon={Database} title="翻译缓存" subtitle={count == null ? "…" : `${count} 段（上限约 50 MB，按最近使用淘汰）`} chevron={false}
-            right={<Button size="sm" variant="secondary" onClick={async () => { await bg({ type: "cache:clear" }); setCount(0); toast({ text: "翻译缓存已清空", tone: "info" }); }}>清空</Button>} />
-          <Row className="px-0" icon={MessageSquareText} title="历史会话" chevron={false} right={<Button size="sm" variant="secondary" onClick={async () => { await new ConversationStore().clear(); toast({ text: "历史会话已清空", tone: "info" }); }}>清空</Button>} />
+          <Row className="px-0" icon={Database} title={tr("opt.translationCache")} subtitle={count == null ? "…" : tr("opt.cacheCount", { count: count })} chevron={false}
+            right={<Button size="sm" variant="secondary" onClick={async () => { await bg({ type: "cache:clear" }); setCount(0); toast({ text: tr("opt.cacheCleared"), tone: "info" }); }}>{tr("common.clear")}</Button>} />
+          <Row className="px-0" icon={MessageSquareText} title={tr("chat.history")} chevron={false} right={<Button size="sm" variant="secondary" onClick={async () => { await new ConversationStore().clear(); toast({ text: tr("opt.historyCleared"), tone: "info" }); }}>{tr("common.clear")}</Button>} />
           <div className="flex flex-wrap gap-2 pt-2">
-            <Button variant="secondary" icon={Download} onClick={exportSettings}>导出设置</Button>
-            <Button variant="secondary" icon={Upload} onClick={() => file.current?.click()}>导入设置</Button>
+            <Button variant="secondary" icon={Download} onClick={exportSettings}>{tr("opt.export")}</Button>
+            <Button variant="secondary" icon={Upload} onClick={() => file.current?.click()}>{tr("opt.import")}</Button>
             <input ref={file} type="file" accept="application/json" hidden onChange={(e) => e.target.files?.[0] && importSettings(e.target.files[0])} />
-            <Button variant="ghost" icon={RotateCcw} onClick={() => { update(() => defaultSettings(chrome.i18n.getUILanguage())); toast({ text: "已恢复默认设置", tone: "info" }); }}>恢复默认设置</Button>
+            <Button variant="ghost" icon={RotateCcw} onClick={() => { update(() => defaultSettings(chrome.i18n.getUILanguage())); toast({ text: tr("opt.resetDone"), tone: "info" }); }}>{tr("opt.resetAll")}</Button>
           </div>
           <div className="pt-2">
             {confirm ? (
               <div className="flex items-center gap-2 rounded-btn bg-destructive/10 px-3 py-2">
-                <span className="flex-1 text-[13px] text-destructive">删除所有 Key、服务、设置、缓存和会话？</span>
-                <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>取消</Button>
-                <Button size="sm" variant="destructive" onClick={async () => { await chrome.storage.local.clear(); await bg({ type: "cache:clear" }); await new ConversationStore().clear(); setConfirm(false); }}>删除</Button>
+                <span className="flex-1 text-[13px] text-destructive">{tr("opt.wipeConfirm")}</span>
+                <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>{tr("common.cancel")}</Button>
+                <Button size="sm" variant="destructive" onClick={async () => { await chrome.storage.local.clear(); await bg({ type: "cache:clear" }); await new ConversationStore().clear(); setConfirm(false); }}>{tr("common.delete")}</Button>
               </div>
             ) : (
-              <Button variant="destructive" icon={Trash2} onClick={() => setConfirm(true)}>清除全部数据</Button>
+              <Button variant="destructive" icon={Trash2} onClick={() => setConfirm(true)}>{tr("opt.wipeAll")}</Button>
             )}
           </div>
         </div>

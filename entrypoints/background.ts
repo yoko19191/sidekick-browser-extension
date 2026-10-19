@@ -6,6 +6,7 @@ import { LONG_PAGE_CHARS, pageSystemPrompt, planLongSummary, sectionPrompt, summ
 import { friendlyError, getKey, keyOptional, loadProviders, redactSecrets, resolveModelRef } from "@/src/lib/providers";
 import { langName, loadSettings } from "@/src/lib/settings";
 import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib/types";
+import { tr } from "@/src/i18n";
 
 declare const __E2E__: boolean;
 export const LLM_PORT = "sidekick-llm";
@@ -38,10 +39,10 @@ export default defineBackground({
 
     chrome.runtime.onInstalled.addListener(() => {
       chrome.contextMenus.removeAll(() => {
-        chrome.contextMenus.create({ id: "pp-translate", title: "翻译此页 / 显示原文", contexts: ["page"] });
-        chrome.contextMenus.create({ id: "pp-translate-selection", title: "翻译选中文字", contexts: ["selection"] });
-        chrome.contextMenus.create({ id: "pp-summarize", title: "在侧栏总结此页", contexts: ["page"] });
-        chrome.contextMenus.create({ id: "pp-ask-selection", title: "用翻翻追问", contexts: ["selection"] });
+        chrome.contextMenus.create({ id: "pp-translate", title: tr("menu.translatePage"), contexts: ["page"] });
+        chrome.contextMenus.create({ id: "pp-translate-selection", title: tr("menu.translateSelection"), contexts: ["selection"] });
+        chrome.contextMenus.create({ id: "pp-summarize", title: tr("menu.summarize"), contexts: ["page"] });
+        chrome.contextMenus.create({ id: "pp-ask-selection", title: tr("menu.askSelection"), contexts: ["selection"] });
       });
     });
 
@@ -51,7 +52,7 @@ export default defineBackground({
       for (const p of providers) keys.set(p.id, await getKey(p.id));
       const usable = (p: ProviderConfig) => !!keys.get(p.id) || keyOptional(p);
       const r = resolveModelRef(ref, providers, usable);
-      if (!r) throw new Error("还没有可用的模型：请先添加一个 API Key");
+      if (!r) throw new Error(tr("err.noModel"));
       return { ...r, apiKey: keys.get(r.provider.id) };
     }
 
@@ -119,7 +120,7 @@ export default defineBackground({
         const r = await streamText({ provider, modelId, apiKey, system: prompt.system, messages: [{ role: "user", content: prompt.user }], temperature: 0.2, maxTokens: 8192 });
         const parsed = parseTranslationResponse(r.text, idx.length);
         if (!parsed) {
-          if (idx.length === 1) throw new Error("模型返回格式无法解析");
+          if (idx.length === 1) throw new Error(tr("err.unparsable"));
           const mid = Math.ceil(idx.length / 2);
           await run(idx.slice(0, mid));
           await run(idx.slice(mid));
@@ -165,7 +166,7 @@ export default defineBackground({
      * to another host. A key typed in the request (onboarding / editing) goes with the config sent alongside it.
      */
     async function providerForRequest(msg: { provider?: ProviderConfig; apiKey?: string }): Promise<{ provider: ProviderConfig; key?: string }> {
-      if (!msg.provider?.id) throw new Error("缺少服务商配置");
+      if (!msg.provider?.id) throw new Error(tr("err.noProvider"));
       if (msg.apiKey) return { provider: msg.provider, key: msg.apiKey };
       const stored = (await loadProviders()).find((p) => p.id === msg.provider!.id);
       if (stored) return { provider: stored, key: await getKey(stored.id) };

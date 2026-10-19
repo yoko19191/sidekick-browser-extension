@@ -1,10 +1,11 @@
 import type { ChatTurn, PortEvent, PortRequest } from "@/src/lib/types";
+import { tr } from "@/src/i18n";
 
 export const LLM_PORT = "sidekick-llm";
 
 export async function bg<T = unknown>(msg: Record<string, unknown>): Promise<T> {
   const res = await chrome.runtime.sendMessage(msg);
-  if (!res?.ok) throw new Error(res?.error ?? "后台无响应");
+  if (!res?.ok) throw new Error(res?.error ?? tr("common.noResponse"));
   return res.data as T;
 }
 
@@ -34,7 +35,7 @@ class LlmClient {
     port.onDisconnect.addListener(() => {
       this.port = null;
       // Any stream still open lost its worker — surface it instead of hanging.
-      for (const [id, h] of this.handlers) h({ type: "error", id, message: "与后台的连接已断开，请重试" });
+      for (const [id, h] of this.handlers) h({ type: "error", id, message: tr("common.disconnected") });
       this.handlers.clear();
       this.updatePinger();
     });

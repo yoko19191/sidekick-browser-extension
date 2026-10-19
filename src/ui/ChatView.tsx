@@ -12,6 +12,7 @@ import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, Dro
 import { Logo } from "./components/Logo";
 import { useActiveTab, type TabInfo } from "./hooks";
 import { bg, llm } from "./messaging";
+import { tr } from "@/src/i18n";
 
 interface Msg extends ChatTurn {
   id: string;
@@ -109,7 +110,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     setInput("");
     const page = kind === "summary" || usePage ? await getPage() : undefined;
     const patch = (f: (x: Msg) => Msg) => setMessages((m) => m.map((x) => (x.id === asst.id ? f(x) : x)));
-    if (kind === "summary" && !page) return patch((x) => ({ ...x, status: "error", error: "无法读取当前页面内容" }));
+    if (kind === "summary" && !page) return patch((x) => ({ ...x, status: "error", error: tr("chat.cannotReadPage") }));
     const h = llm.chat({ task: kind ?? "chat", messages: history, page: page && { title: page.title, url: page.url, markdown: page.markdown, length: page.length } }, (e) => {
       if (e.type === "start") patch((x) => ({ ...x, model: e.model }));
       if (e.type === "progress") patch((x) => ({ ...x, progress: { done: e.done, total: e.total } }));
@@ -127,7 +128,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     });
     setBusy({ abort: h.abort });
   }
-  const summarize = () => send("总结本页", "summary");
+  const summarize = () => send(tr("chat.summarizePage"), "summary");
 
   // hand-offs from the page (context menu "summarize", selection card "ask in panel")
   useEffect(() => {
@@ -138,7 +139,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
       if (!a || a.tabId !== tab.id || Date.now() - a.at > 120_000) return; // 2 min: long enough to click the toolbar icon after the fallback toast
       await chrome.storage.session.remove("pendingAction");
       if (a.type === "summarize") summarize();
-      if (a.type === "ask" && a.text) setInput(`关于这段内容：\n> ${a.text.replace(/\n/g, "\n> ")}\n\n`);
+      if (a.type === "ask" && a.text) setInput(tr("chat.askAbout", { quote: a.text.replace(/\n/g, "\n> ") }));
     };
     consume();
     const onCh = (ch: Record<string, chrome.storage.StorageChange>, area: string) => area === "session" && ch.pendingAction?.newValue && consume();
@@ -162,7 +163,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     if (!tab) return;
     try {
       const r = await bg<{ found: boolean }>({ type: "page:locate", tabId: tab.id, text });
-      if (!r.found) toast({ text: "没在页面上找到这段原文", tone: "info" });
+      if (!r.found) toast({ text: tr("chat.citationNotFound"), tone: "info" });
     } catch (e) {
       toast({ text: (e as Error).message, tone: "error" });
     }
@@ -185,12 +186,12 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
         <Dropdown>
           <DropdownTrigger asChild>
             <button data-testid="model-switch" className="ml-1 flex h-8 min-w-0 max-w-[48%] items-center gap-1 rounded-btn px-2 text-[13.5px] font-semibold outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="truncate">{chatModel ? chatModel.modelId : "未配置模型"}</span>
+              <span className="truncate">{chatModel ? chatModel.modelId : tr("chat.noModel")}</span>
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           </DropdownTrigger>
           <DropdownContent testId="model-menu">
-            {allModels.length === 0 && <DropdownItem icon={KeyRound} onSelect={onSetup}>添加 API Key</DropdownItem>}
+            {allModels.length === 0 && <DropdownItem icon={KeyRound} onSelect={onSetup}>{tr("chat.addKey")}</DropdownItem>}
             {allModels.map(({ p, models }) => (
               <div key={p.id}>
                 <DropdownLabel>{p.name}</DropdownLabel>
@@ -203,13 +204,13 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
               </div>
             ))}
             <DropdownSeparator />
-            <DropdownItem icon={Settings2} onSelect={() => chrome.runtime.openOptionsPage()}>管理模型与密钥…</DropdownItem>
+            <DropdownItem icon={Settings2} onSelect={() => chrome.runtime.openOptionsPage()}>{tr("chat.manageModels")}</DropdownItem>
           </DropdownContent>
         </Dropdown>
         <div className="flex-1" />
-        <IconButton icon={Languages} label={translating ? "显示原文" : "翻译本页"} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!pageOk} />
-        <IconButton icon={Plus} label="新对话" onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
-        <IconButton icon={History} label="历史会话" onClick={() => setHistoryOpen(true)} testId="open-history" />
+        <IconButton icon={Languages} label={translating ? tr("chat.showOriginal") : tr("chat.translatePage")} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!pageOk} />
+        <IconButton icon={Plus} label={tr("chat.newChat")} onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
+        <IconButton icon={History} label={tr("chat.history")} onClick={() => setHistoryOpen(true)} testId="open-history" />
         <QuickSettings settings={settings} update={update} tab={tab} host={host} />
       </header>
 
@@ -218,8 +219,8 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
           <div className="mt-1 flex items-center gap-2.5 rounded-card bg-card px-3 py-2.5" data-testid="page-chip">
             {tab?.favIconUrl ? <img src={tab.favIconUrl} className="size-4 rounded-[4px]" alt="" /> : <Globe className="size-4 text-muted-foreground" />}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium">{tab?.title || host || "当前页面"}</div>
-              <div className="truncate text-[12px] text-muted-foreground">{host || "尚未获得此页的访问权限"}</div>
+              <div className="truncate text-[13px] font-medium">{tab?.title || host || tr("chat.currentPage")}</div>
+              <div className="truncate text-[12px] text-muted-foreground">{host || tr("chat.noAccessYet")}</div>
             </div>
           </div>
         )}
@@ -237,28 +238,28 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
         {!configured && (
           <div data-testid="nokey-banner" className="flex animate-in items-center gap-2 rounded-card bg-primary-soft px-3 py-2 text-[12.5px] text-primary-soft-foreground">
             <KeyRound className="size-4 shrink-0" />
-            <span className="flex-1">还没有配置模型，填一个 API Key 即可开始</span>
-            <Button size="sm" onClick={onSetup} testId="nokey-setup">去配置</Button>
+            <span className="flex-1">{tr("chat.noKeyBanner")}</span>
+            <Button size="sm" onClick={onSetup} testId="nokey-setup">{tr("chat.goSetup")}</Button>
           </div>
         )}
         {pageError && (
           <div data-testid="page-error" data-needs-grant={needsGrant ? "" : undefined} className="flex animate-in items-center gap-2 rounded-card bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">
             <Lock className="size-4 shrink-0" />
             <span className="min-w-0 flex-1">
-              {!needsGrant ? pageError : host ? `需要访问 ${host} 的权限才能读取或翻译此页` : "需要此页的访问权限：点一下工具栏的翻翻图标即可授权本页"}
+              {!needsGrant ? pageError : host ? tr("chat.needHost", { host: host }) : tr("chat.needAccessClickIcon")}
             </span>
-            {needsGrant && host && <Button size="sm" variant="outline" onClick={grantSite} testId="grant-site">允许</Button>}
-            <button onClick={() => setPageError(null)} className="opacity-60 hover:opacity-100" aria-label="关闭"><X className="size-4" /></button>
+            {needsGrant && host && <Button size="sm" variant="outline" onClick={grantSite} testId="grant-site">{tr("chat.allow")}</Button>}
+            <button onClick={() => setPageError(null)} className="opacity-60 hover:opacity-100" aria-label={tr("common.close")}><X className="size-4" /></button>
           </div>
         )}
         {translating && (
           <div data-testid="translate-status" className="flex animate-in items-center gap-2 rounded-card bg-card px-3 py-2 text-[12.5px]">
             {tstate!.done < tstate!.total ? <Loader2 className="size-4 animate-spin text-primary" /> : <Check className="size-4 text-primary" />}
             <span className="flex-1 text-muted-foreground">
-              {tstate!.done < tstate!.total ? `正在翻译 ${tstate!.done}/${tstate!.total}` : `已译为${langLabel(settings.translation.targetLang)} · ${tstate!.done} 段`}
-              {tstate!.errors > 0 && <span className="text-destructive"> · {tstate!.errors} 段失败，可在页面上重试</span>}
+              {tstate!.done < tstate!.total ? tr("chat.translating", { done: tstate!.done, total: tstate!.total }) : tr("chat.translatedTo", { lang: langLabel(settings.translation.targetLang), done: tstate!.done })}
+              {tstate!.errors > 0 && <span className="text-destructive"> · {tstate!.errors} {tr("chat.failedSuffix")}</span>}
             </span>
-            <button onClick={toggleTranslate} className="rounded-sm px-2 py-0.5 font-medium text-foreground hover:bg-muted">显示原文</button>
+            <button onClick={toggleTranslate} className="rounded-sm px-2 py-0.5 font-medium text-foreground hover:bg-muted">{tr("chat.showOriginal")}</button>
           </div>
         )}
       </div>
@@ -281,23 +282,23 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
                 send(input);
               }
             }}
-            placeholder="问点什么…"
+            placeholder={tr("chat.placeholder")}
             className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3.5 pt-3 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
           />
           <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
             <button type="button" onClick={() => setUsePage((v) => !v)} disabled={!pageOk} data-testid="use-page" data-on={usePage && pageOk ? "" : undefined}
               className={cn("flex h-7 items-center gap-1.5 rounded-btn px-2.5 text-[12px] font-medium transition", usePage && pageOk ? "bg-background text-foreground" : "text-muted-foreground hover:bg-muted")}>
               <FileText className="size-3.5" />
-              引用本页
+              {tr("chat.usePage")}
               {usePage && pageOk && <Check className="size-3.5 text-primary" strokeWidth={2.6} />}
             </button>
             <div className="flex-1" />
             {busy ? (
-              <button onClick={() => busy.abort()} className="grid size-8 place-items-center rounded-btn bg-foreground text-background transition hover:opacity-85" aria-label="停止" data-testid="stop">
+              <button onClick={() => busy.abort()} className="grid size-8 place-items-center rounded-btn bg-foreground text-background transition hover:opacity-85" aria-label={tr("chat.stop")} data-testid="stop">
                 <Square className="size-3 fill-current" />
               </button>
             ) : (
-              <button onClick={() => send(input)} disabled={!input.trim()} data-testid="send" aria-label="发送"
+              <button onClick={() => send(input)} disabled={!input.trim()} data-testid="send" aria-label={tr("chat.send")}
                 className="grid size-8 place-items-center rounded-btn bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-input disabled:text-muted-foreground">
                 <ArrowUp className="size-4" strokeWidth={2.4} />
               </button>
@@ -336,28 +337,28 @@ function QuickSettings({ settings, update, tab, host }: { settings: Settings; up
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <IconButton icon={Settings2} label="快捷设置" testId="open-quick-settings" />
+        <IconButton icon={Settings2} label={tr("qs.title")} testId="open-quick-settings" />
       </PopoverTrigger>
       <PopoverContent testId="quick-settings">
         <div className="space-y-3.5">
           <div>
-            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">目标语言</div>
+            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">{tr("qs.targetLang")}</div>
             <Select testId="qs-target-lang" value={t.targetLang} onChange={(v) => setT({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />
           </div>
           <div>
-            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">翻译显示</div>
-            <Segmented<DisplayMode> testId="qs-display-mode" value={t.displayMode} onChange={(v) => setT({ displayMode: v })} options={[{ value: "bilingual", label: "双语对照" }, { value: "translation-only", label: "仅译文" }]} />
+            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">{tr("qs.displayMode")}</div>
+            <Segmented<DisplayMode> testId="qs-display-mode" value={t.displayMode} onChange={(v) => setT({ displayMode: v })} options={[{ value: "bilingual", label: tr("mode.bilingual") }, { value: "translation-only", label: tr("mode.only") }]} />
           </div>
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium">本站自动翻译</div>
-              <div className="truncate text-[12px] text-muted-foreground">{host || "当前页面不支持"}</div>
+              <div className="text-[13px] font-medium">{tr("qs.autoSite")}</div>
+              <div className="truncate text-[12px] text-muted-foreground">{host || tr("qs.unsupportedPage")}</div>
             </div>
-            <Switch testId="qs-auto-site" checked={auto} onChange={toggleAuto} label="本站自动翻译" />
+            <Switch testId="qs-auto-site" checked={auto} onChange={toggleAuto} label={tr("qs.autoSite")} />
           </div>
           <div className="h-px bg-border/70" />
           <button data-testid="qs-more" onClick={() => chrome.runtime.openOptionsPage()} className="flex w-full items-center justify-between rounded-btn px-1 py-1 text-[13px] font-medium text-muted-foreground hover:text-foreground">
-            更多设置 <span aria-hidden>→</span>
+            {tr("qs.more")} <span aria-hidden>→</span>
           </button>
         </div>
       </PopoverContent>
@@ -367,15 +368,15 @@ function QuickSettings({ settings, update, tab, host }: { settings: Settings; up
 
 function EmptyState(p: { host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onKeyPoints: () => void }) {
   const chips = [
-    { icon: FileText, label: "总结本页", onClick: p.onSummarize, testId: "action-summarize" },
-    { icon: Languages, label: p.translating ? "显示原文" : "翻译本页", onClick: p.onTranslate, testId: "action-translate" },
-    { icon: ListChecks, label: "提取要点", onClick: p.onKeyPoints, testId: "action-keypoints" },
+    { icon: FileText, label: tr("chat.summarizePage"), onClick: p.onSummarize, testId: "action-summarize" },
+    { icon: Languages, label: p.translating ? tr("chat.showOriginal") : tr("chat.translatePage"), onClick: p.onTranslate, testId: "action-translate" },
+    { icon: ListChecks, label: tr("chat.keyPoints"), onClick: p.onKeyPoints, testId: "action-keypoints" },
   ];
   return (
     <div className="animate-in pt-10">
       <div className="px-1">
-        <div className="text-[22px] font-semibold tracking-tight">有什么可以帮你？</div>
-        <div className="mt-1.5 text-[13.5px] leading-6 text-muted-foreground">{p.pageOk ? `可以总结、翻译（译为${p.targetLang}），或围绕这个页面提问。` : "浏览器内部页面无法读取，你仍可以直接提问。"}</div>
+        <div className="text-[22px] font-semibold tracking-tight">{tr("chat.emptyTitle")}</div>
+        <div className="mt-1.5 text-[13.5px] leading-6 text-muted-foreground">{p.pageOk ? tr("chat.emptyDesc", { lang: p.targetLang }) : tr("chat.emptyRestricted")}</div>
       </div>
       {p.pageOk && (
         <div className="mt-5 flex flex-wrap gap-2">
@@ -423,12 +424,12 @@ function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; on
       {m.status === "error" ? (
         <div className="rounded-card bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
           {m.content && <div className="md mb-2 opacity-80"><SafeMarkdown>{m.content}</SafeMarkdown></div>}
-          <div className="flex items-center gap-2"><span className="flex-1" data-testid="assistant-error">{m.error}</span><Button size="sm" variant="ghost" icon={RotateCcw} onClick={onRetry}>重试</Button></div>
+          <div className="flex items-center gap-2"><span className="flex-1" data-testid="assistant-error">{m.error}</span><Button size="sm" variant="ghost" icon={RotateCcw} onClick={onRetry}>{tr("common.retry")}</Button></div>
         </div>
       ) : !m.content ? (
         <div className="flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
           <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: `${i * 120}ms` }} />)}</span>
-          {m.progress && m.progress.total > 1 ? `长文分段阅读中 ${m.progress.done}/${m.progress.total}` : m.status === "thinking" ? "思考中…" : m.kind === "summary" ? "正在阅读页面…" : ""}
+          {m.progress && m.progress.total > 1 ? tr("chat.readingSections", { done: m.progress.done, total: m.progress.total }) : m.status === "thinking" ? tr("chat.thinking") : m.kind === "summary" ? tr("chat.readingPage") : ""}
         </div>
       ) : (
         <div ref={ref} onClick={onClick} className={cn("md", m.status === "streaming" && "caret")} data-testid="assistant-content">
@@ -438,16 +439,16 @@ function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; on
       {m.coverage != null && (
         <div data-testid="coverage-notice" className="mt-2 flex items-center gap-1.5 rounded-[10px] bg-muted px-2.5 py-1.5 text-[12px] text-muted-foreground">
           <Info className="size-3.5 shrink-0" />
-          {m.kind === "summary" ? `页面过长，仅总结了前 ${m.coverage}%` : `页面过长，仅参考了前 ${m.coverage}%`}
+          {m.kind === "summary" ? tr("chat.coverageSummary", { percent: m.coverage }) : tr("chat.coverageChat", { percent: m.coverage })}
         </div>
       )}
       {m.status === "done" && (
         <div className="mt-1.5 flex items-center gap-0.5 text-muted-foreground">
-          <ActionBtn title="复制" onClick={() => { navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
+          <ActionBtn title={tr("common.copy")} onClick={() => { navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
             {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           </ActionBtn>
-          <ActionBtn title="重新生成" onClick={onRetry}><RotateCcw className="size-3.5" /></ActionBtn>
-          {/\[\^\d+\]/.test(m.content) && <ActionBtn title="定位引用到原文" onClick={() => { const f = footnotes()[0]; if (f) onLocate(f); }} testId="locate-citation"><Crosshair className="size-3.5" /></ActionBtn>}
+          <ActionBtn title={tr("chat.regenerate")} onClick={onRetry}><RotateCcw className="size-3.5" /></ActionBtn>
+          {/\[\^\d+\]/.test(m.content) && <ActionBtn title={tr("chat.locateCitation")} onClick={() => { const f = footnotes()[0]; if (f) onLocate(f); }} testId="locate-citation"><Crosshair className="size-3.5" /></ActionBtn>}
           {m.model && <span className="ml-1 truncate text-[11.5px]">{m.model}</span>}
         </div>
       )}
@@ -467,19 +468,19 @@ function HistoryDrawer({ onClose, onOpen }: { onClose: () => void; onOpen: (c: C
     <div className="absolute inset-0 z-20 flex flex-col bg-background" data-testid="history">
       <header className="flex h-12 items-center gap-2 px-3">
         <History className="size-[18px] text-muted-foreground" />
-        <div className="flex-1 text-[14px] font-semibold">历史会话</div>
-        <IconButton icon={X} label="关闭" onClick={onClose} />
+        <div className="flex-1 text-[14px] font-semibold">{tr("chat.history")}</div>
+        <IconButton icon={X} label={tr("common.close")} onClick={onClose} />
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-        {list?.length === 0 && <div className="pt-16 text-center text-[13px] text-muted-foreground">还没有会话记录</div>}
+        {list?.length === 0 && <div className="pt-16 text-center text-[13px] text-muted-foreground">{tr("chat.historyEmpty")}</div>}
         <div className="space-y-1.5">
           {list?.map((c) => (
             <div key={c.id} className="group flex items-center gap-2 rounded-card bg-card px-3 py-2.5 transition hover:bg-card-strong">
               <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(c)} data-testid="history-item">
                 <div className="truncate text-[13px] font-medium">{c.messages.find((m) => m.role === "user")?.content || c.title}</div>
-                <div className="mt-0.5 truncate text-[12px] text-muted-foreground">{c.host || "无页面"} · {new Date(c.updatedAt).toLocaleString()}</div>
+                <div className="mt-0.5 truncate text-[12px] text-muted-foreground">{c.host || tr("chat.noPage")} · {new Date(c.updatedAt).toLocaleString()}</div>
               </button>
-              <button className="text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100" aria-label="删除" onClick={async () => { await store.delete(c.id); load(); }}>
+              <button className="text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100" aria-label={tr("common.delete")} onClick={async () => { await store.delete(c.id); load(); }}>
                 <Trash2 className="size-4" />
               </button>
             </div>

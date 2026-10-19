@@ -1,3 +1,7 @@
+import { tr } from "@/src/i18n";
+
+/** Catalog strings are ours, but escape anyway: a future translation must not be able to inject markup. */
+const esc = (x: string) => x.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 /** Shadow-DOM UI injected into web pages: floating button + selection-translation card. No chrome.* here. */
 
 const CSS = `
@@ -90,8 +94,8 @@ export class PageUi {
       const f = document.createElement("div");
       f.className = "fab";
       f.setAttribute("role", "button");
-      f.title = "点击：翻译 / 显示原文 · 右键或长按：打开侧栏";
-      f.innerHTML = `${ICON_TRANSLATE}<button class="x" title="在本站隐藏">✕</button>`;
+      f.title = tr("page.fabTitle");
+      f.innerHTML = `${ICON_TRANSLATE}<button class="x" title="${esc(tr("page.hideOnSite"))}">✕</button>`;
       let timer: number | undefined;
       let long = false;
       f.addEventListener("pointerdown", () => {
@@ -134,7 +138,7 @@ export class PageUi {
     this.hideDot();
     const d = document.createElement("button");
     d.className = "dot";
-    d.title = "翻译选中文字";
+    d.title = tr("menu.translateSelection");
     d.setAttribute("data-testid", "pp-selection-dot");
     d.innerHTML = ICON_TRANSLATE;
     d.style.left = `${x}px`;
@@ -167,9 +171,9 @@ export class PageUi {
     c.setAttribute("data-pp-card", "");
     c.style.left = `${Math.max(8, Math.min(x - 160, innerWidth - 348))}px`;
     c.style.top = `${y + 280 > innerHeight ? Math.max(8, y - 300) : y}px`;
-    c.innerHTML = `<div class="hd"><b>划词翻译</b><button class="close" title="关闭">✕</button></div>
+    c.innerHTML = `<div class="hd"><b>${esc(tr("page.selectionTitle"))}</b><button class="close" title="${esc(tr("common.close"))}">✕</button></div>
       <div class="src"></div><div class="out"><div class="sk" style="width:92%"></div><div class="sk" style="width:70%"></div></div>
-      <div class="ft"><button class="btn copy">复制</button><button class="btn primary ask">发到侧栏追问</button></div>`;
+      <div class="ft"><button class="btn copy">${esc(tr("common.copy"))}</button><button class="btn primary ask">${esc(tr("page.askInPanel"))}</button></div>`;
     (c.querySelector(".src") as HTMLElement).textContent = text;
     c.querySelector(".close")!.addEventListener("click", () => this.hideSelection());
     const out = c.querySelector(".out") as HTMLElement;
