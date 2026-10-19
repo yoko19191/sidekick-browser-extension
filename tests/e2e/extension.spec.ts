@@ -213,6 +213,86 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await page.close();
   });
 
+  test("real side panel opens from page gestures (fab, 发到侧栏追问), 用翻翻追问 menu, and the toast fallback", async () => {
+    test.setTimeout(90_000);
+    for (const p of context.pages()) if (p.url().startsWith("chrome-extension://")) await p.close();
+    const sw = context.serviceWorkers()[0];
+    const page = await openArticle();
+    // Driver page: the options page has no dev:panel-state listener, so only the real side panel answers.
+    const driver = await context.newPage();
+    await driver.goto(`chrome-extension://${extId}/options.html`);
+    const dev = (msg: Record<string, unknown>) => driver.evaluate(async (m) => (await chrome.runtime.sendMessage(m))?.data ?? null, msg);
+    const panelState = () => driver.evaluate(() => chrome.runtime.sendMessage({ type: "dev:panel-state" }).catch(() => null)) as Promise<{ url: string; composer: string | null } | null>;
+    await page.bringToFront();
+    const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)!.id!, article);
+    const winId = await sw.evaluate(async (id) => (await chrome.tabs.get(id)).windowId, tabId);
+    const sidePanels = () => sw.evaluate(async () => (await chrome.runtime.getContexts({ contextTypes: ["SIDE_PANEL" as chrome.runtime.ContextType] })).length);
+    const closePanel = async () => {
+      await sw.evaluate((w) => (chrome.sidePanel as unknown as { close(o: { windowId: number }): Promise<void> }).close({ windowId: w }).catch(() => {}), winId);
+      await expect.poll(sidePanels).toBe(0);
+    };
+    const ui = page.locator("sidekick-ui");
+    const selectAndOpenCard = async () => {
+      await page.evaluate(() => {
+        const p = [...document.querySelectorAll("article p")].find((x) => x.textContent!.includes("A vegetated roof works like a sponge"))!;
+        const r = document.createRange();
+        r.selectNodeContents(p);
+        const sel = getSelection()!;
+        sel.removeAllRanges();
+        sel.addRange(r);
+        const b = p.getBoundingClientRect();
+        p.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: b.right, clientY: b.bottom }));
+      });
+      await ui.getByTestId("pp-selection-dot").click();
+      await ui.locator(".card .out[data-done]").waitFor();
+    };
+    await expect(ui.locator(".fab")).toBeVisible({ timeout: 10_000 });
+    await expect.poll(sidePanels).toBe(0);
+
+    // control: without a user gesture Chrome refuses
+    const ctl = await sw.evaluate((id) => chrome.sidePanel.open({ tabId: id }).then(() => "opened", (e: Error) => e.message), tabId);
+    expect(ctl).toContain("user gesture");
+
+    // 1) floating button (right-click) → content script → SW → sidePanel.open: the gesture carries over
+    await ui.locator(".fab").click({ button: "right" });
+    await expect.poll(sidePanels).toBe(1);
+    await expect.poll(async () => (await panelState())?.url ?? "").toContain("/sidepanel.html");
+    await closePanel();
+
+    // 2) selection card "发到侧栏追问" opens the real panel and pre-fills the composer
+    await selectAndOpenCard();
+    await page.waitForTimeout(1500); // user reads the translation first
+    await ui.locator(".card .ask").click();
+    await expect.poll(sidePanels).toBe(1);
+    await expect.poll(async () => (await panelState())?.composer ?? "").toContain("A vegetated roof works like a sponge");
+    await expect(ui.getByTestId("pp-toast")).toHaveCount(0);
+    await closePanel();
+
+    // 3) context menu "用翻翻追问": the item is registered, and its real onClicked handler opens the panel with the
+    //    selection pre-filled. Playwright cannot click native menus, so the handler is invoked from an extension page;
+    //    page.evaluate runs with a user gesture, which Chrome forwards through runtime.sendMessage just like a menu click.
+    expect(await dev({ type: "dev:menu-exists", id: "pp-ask-selection" })).toBe(true);
+    await dev({ type: "dev:menu-click", id: "pp-ask-selection", text: "Bees, butterflies and birds use rooftop gardens", tabId });
+    await expect.poll(sidePanels).toBe(1);
+    await expect.poll(async () => (await panelState())?.composer ?? "").toContain("Bees, butterflies and birds");
+    await closePanel();
+
+    // 4) fallback: if Chrome refuses to open, the card shows a toast and the question waits in storage.session
+    await dev({ type: "dev:force-panel-fail", on: true });
+    await selectAndOpenCard();
+    await ui.locator(".card .ask").click();
+    await expect(ui.getByTestId("pp-toast")).toHaveText("点工具栏的翻翻图标继续");
+    expect(await sidePanels()).toBe(0);
+    const pending = await sw.evaluate(async () => (await chrome.storage.session.get("pendingAction")).pendingAction as { type: string; text: string });
+    expect(pending.type).toBe("ask");
+    await dev({ type: "dev:force-panel-fail", on: false });
+    await ui.locator(".fab").click({ button: "right" }); // stands in for the toolbar icon
+    await expect.poll(async () => (await panelState())?.composer ?? "").toContain("A vegetated roof works like a sponge");
+    await closePanel();
+    await driver.close();
+    await page.close();
+  });
+
   test("M0: pi-ai tool calling works inside the MV3 service worker", async () => {
     const panel = await openPanel();
     const r = await panel.evaluate(async () => chrome.runtime.sendMessage({ type: "dev:selftest-tools" }));

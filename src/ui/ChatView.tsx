@@ -133,7 +133,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     const consume = async () => {
       const r = await chrome.storage.session.get("pendingAction");
       const a = r.pendingAction as { type: string; tabId: number; at: number; text?: string } | undefined;
-      if (!a || a.tabId !== tab.id || Date.now() - a.at > 30000) return;
+      if (!a || a.tabId !== tab.id || Date.now() - a.at > 120_000) return; // 2 min: long enough to click the toolbar icon after the fallback toast
       await chrome.storage.session.remove("pendingAction");
       if (a.type === "summarize") summarize();
       if (a.type === "ask" && a.text) setInput(`关于这段内容：\n> ${a.text.replace(/\n/g, "\n> ")}\n\n`);

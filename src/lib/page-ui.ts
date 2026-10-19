@@ -32,6 +32,8 @@ button { all: unset; cursor: pointer; }
 .close { width: 22px; height: 22px; border-radius: 8px; display: grid; place-items: center; color: #a1a1aa; font-size: 13px; }
 .close:hover { background: #f1f1f4; color: #18181b; }
 .sk { height: 10px; border-radius: 5px; background: linear-gradient(90deg,#f1f1f4,#e7e7ec,#f1f1f4); background-size: 200% 100%; animation: sh 1.2s infinite; margin: 6px 0; }
+.toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 2147483647; padding: 9px 14px; border-radius: 12px;
+  background: #18181b; color: #fafafa; font-size: 13px; box-shadow: 0 8px 28px rgba(0,0,0,.18); animation: in .18s ease-out; }
 @keyframes sh { to { background-position: -200% 0; } }
 @keyframes in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-color-scheme: dark) {
@@ -190,6 +192,17 @@ export class PageUi {
       span.textContent = (e as Error).message;
       out.appendChild(span);
     }
+  }
+
+  /** Short notice at the bottom of the page (e.g. when the side panel could not be opened). */
+  toast(text: string, ms = 4000) {
+    this.root.querySelector(".toast")?.remove();
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.setAttribute("data-testid", "pp-toast");
+    t.textContent = text;
+    this.root.appendChild(t);
+    setTimeout(() => t.remove(), ms);
   }
 
   /** For tests / debugging. */

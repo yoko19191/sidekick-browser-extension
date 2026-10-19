@@ -35,12 +35,20 @@ export default defineContentScript({
         return r.data as T;
       });
 
+    // The SW opens the side panel inside our click's user-gesture window. If Chrome refuses anyway, the request
+    // stays in storage.session and the panel picks it up when the user opens it from the toolbar.
+    const openPanel = (msg: Record<string, unknown>) =>
+      send<{ opened: boolean }>(msg)
+        .then((r) => r.opened)
+        .catch(() => false)
+        .then((ok) => ok || ui.toast("点工具栏的翻翻图标继续"));
+
     const ui = new PageUi({
       onFabClick: () => send({ type: "translate:self-toggle" }).catch(() => {}),
-      onFabOpenPanel: () => send({ type: "panel:open" }).catch(() => {}),
+      onFabOpenPanel: () => openPanel({ type: "panel:open" }),
       onFabDismiss: () => ui.setFab(false),
       translateSelection: async (text) => (await send<{ translation: string }>({ type: "translate:selection", text })).translation,
-      askInPanel: (text) => send({ type: "panel:ask", text }).catch(() => {}),
+      askInPanel: (text) => openPanel({ type: "panel:ask", text }),
     });
 
     const applyConfig = (s: TSettings) => {

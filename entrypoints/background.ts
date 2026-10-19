@@ -41,6 +41,7 @@ export default defineBackground({
         chrome.contextMenus.create({ id: "pp-translate", title: "翻译此页 / 显示原文", contexts: ["page"] });
         chrome.contextMenus.create({ id: "pp-translate-selection", title: "翻译选中文字", contexts: ["selection"] });
         chrome.contextMenus.create({ id: "pp-summarize", title: "在侧栏总结此页", contexts: ["page"] });
+        chrome.contextMenus.create({ id: "pp-ask-selection", title: "用翻翻追问", contexts: ["selection"] });
       });
     });
 
@@ -141,9 +142,20 @@ export default defineBackground({
       return { translation: r.text.trim(), model: modelId };
     }
 
-    async function openPanelFor(tabId: number, pending?: Record<string, unknown>) {
-      if (pending) await chrome.storage.session.set({ pendingAction: { ...pending, tabId, at: Date.now() } });
-      await chrome.sidePanel.open({ tabId }).catch(() => {});
+    /**
+     * Opens the side panel for a tab. `chrome.sidePanel.open` must be called synchronously inside the
+     * user-gesture window (no `await` before it), so the open call goes first and the pending action is
+     * stored afterwards — the panel consumes it on load or via storage.onChanged, whichever comes first.
+     * Resolves with whether Chrome actually opened it, so the caller can fall back.
+     */
+    let e2eForcePanelFail = false; // e2e-only switch to exercise the fallback path
+    function openPanelFor(tabId: number, pending?: Record<string, unknown>): Promise<{ opened: boolean; error?: string }> {
+      const opening = (__E2E__ && e2eForcePanelFail ? Promise.reject(new Error("forced (e2e)")) : chrome.sidePanel.open({ tabId })).then(
+        () => ({ opened: true }),
+        (e: Error) => ({ opened: false, error: String(e?.message ?? e) }),
+      );
+      const storing = pending ? chrome.storage.session.set({ pendingAction: { ...pending, tabId, at: Date.now() } }) : Promise.resolve();
+      return Promise.all([opening, storing]).then(([r]) => r);
     }
 
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -165,11 +177,25 @@ export default defineBackground({
           return tabId ? reply(openPanelFor(tabId)) : false;
         case "panel:ask":
           return tabId ? reply(openPanelFor(tabId, { type: "ask", text: String(msg.text ?? "").slice(0, 4000) })) : false;
+        // ---- diagnostics: e2e builds only ----
         case "sw:info":
-          return reply(Promise.resolve({ bootId, maxIdleGapMs }));
+          return __E2E__ ? reply(Promise.resolve({ bootId, maxIdleGapMs })) : false;
         case "sw:idle-reset":
+          if (!__E2E__) return false;
           maxIdleGapMs = 0;
           return reply(Promise.resolve({ bootId }));
+        case "dev:menu-exists":
+          // e2e: contextMenus.update rejects for unknown ids, so this proves the item is registered.
+          if (!__E2E__) return false;
+          return reply(chrome.contextMenus.update(String(msg.id), {}).then(() => true, () => false));
+        case "dev:menu-click":
+          // e2e: run the real onClicked handler (Playwright cannot click native context menus).
+          if (!__E2E__) return false;
+          return reply(Promise.resolve(onMenuClick({ menuItemId: msg.id, selectionText: msg.text } as chrome.contextMenus.OnClickData, { id: msg.tabId } as chrome.tabs.Tab)).then(() => true));
+        case "dev:force-panel-fail":
+          if (!__E2E__) return false;
+          e2eForcePanelFail = !!msg.on;
+          return reply(Promise.resolve(e2eForcePanelFail));
       }
       // Extension pages (side panel, options page, or the panel page opened in a tab) — never content scripts.
       const fromExtensionPage = sender.id === chrome.runtime.id && !!sender.url?.startsWith(chrome.runtime.getURL(""));
@@ -288,14 +314,17 @@ export default defineBackground({
     chrome.commands.onCommand.addListener((command, tab) => {
       if (command === "toggle-translate" && tab?.id) toggleTranslate(tab.id).catch(() => {});
     });
-    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    chrome.contextMenus.onClicked.addListener((info, tab) => onMenuClick(info, tab));
+    async function onMenuClick(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
       if (!tab?.id) return;
       if (info.menuItemId === "pp-translate") toggleTranslate(tab.id).catch(() => {});
+      // Context-menu clicks are user gestures: openPanelFor calls sidePanel.open synchronously (no await before it).
       if (info.menuItemId === "pp-summarize") openPanelFor(tab.id, { type: "summarize" });
+      if (info.menuItemId === "pp-ask-selection" && info.selectionText) openPanelFor(tab.id, { type: "ask", text: info.selectionText.slice(0, 4000) });
       if (info.menuItemId === "pp-translate-selection" && info.selectionText) {
         await ensureContentScript(tab.id).catch(() => {});
         chrome.tabs.sendMessage(tab.id, { type: "selection:show", text: info.selectionText }).catch(() => {});
       }
-    });
+    }
   },
 });
