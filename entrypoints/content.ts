@@ -254,9 +254,6 @@ export default defineContentScript({
         case "page:locate":
           sendResponse({ found: locate(String(msg.text ?? "")) });
           return;
-        case "page:selection":
-          sendResponse({ text: (getSelection()?.toString() ?? "").trim().slice(0, 4000) });
-          return;
         case "selection:show":
           ui.showCard(String(msg.text ?? ""));
           sendResponse({ ok: true });

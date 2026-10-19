@@ -1,5 +1,5 @@
 import {
-  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, RotateCcw, ScanText, Settings2, Square, TextQuote, Trash2, X,
+  ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, Plus, RotateCcw, Settings2, Square, Trash2, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SafeMarkdown } from "./Markdown";
@@ -9,7 +9,7 @@ import { keyOptional, modelRef, resolveModelRef } from "@/src/lib/providers";
 import { LANGUAGES, langLabel } from "@/src/lib/settings";
 import type { ChatTurn, DisplayMode, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
 import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, Popover, PopoverContent, PopoverTrigger, Segmented, Select, Switch, useToast } from "./components/ui";
-import { Mascot, type MascotState } from "./mascot/Mascot";
+import { Logo } from "./components/Logo";
 import { useActiveTab, type TabInfo } from "./hooks";
 import { bg, llm } from "./messaging";
 import { tr } from "@/src/i18n";
@@ -45,14 +45,6 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   const [pageError, setPageError] = useState<string | null>(null);
   const [tstate, setTstate] = useState<TranslateState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [composerFocused, setComposerFocused] = useState(false);
-  const [flash, setFlash] = useState<"done" | "surprised" | null>(null); // brief mascot reactions
-  const flashTimer = useRef(0);
-  const react = useCallback((f: "done" | "surprised") => {
-    clearTimeout(flashTimer.current);
-    setFlash(f);
-    flashTimer.current = window.setTimeout(() => setFlash(null), 1200);
-  }, []);
   const pageCache = useRef(new Map<string, PageContent>());
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -147,10 +139,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
       if (!a || a.tabId !== tab.id || Date.now() - a.at > 120_000) return; // 2 min: long enough to click the toolbar icon after the fallback toast
       await chrome.storage.session.remove("pendingAction");
       if (a.type === "summarize") summarize();
-      if (a.type === "ask" && a.text) {
-        setInput(tr("chat.askAbout", { quote: a.text.replace(/\n/g, "\n> ") }));
-        react("surprised");
-      }
+      if (a.type === "ask" && a.text) setInput(tr("chat.askAbout", { quote: a.text.replace(/\n/g, "\n> ") }));
     };
     consume();
     const onCh = (ch: Record<string, chrome.storage.StorageChange>, area: string) => area === "session" && ch.pendingAction?.newValue && consume();
@@ -168,34 +157,6 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     } catch (e) {
       setPageError((e as Error).message);
     }
-  }
-
-  /** Current selection on the page (empty string when nothing is selected). */
-  async function pageSelection(): Promise<string | undefined> {
-    if (!tab || (tab.url && restricted(tab.url))) return undefined;
-    try {
-      const r = await bg<{ text: string }>({ type: "page:selection", tabId: tab.id });
-      setPageError(null);
-      return r.text;
-    } catch (e) {
-      setPageError((e as Error).message);
-      return undefined;
-    }
-  }
-  async function explainSelection() {
-    if (!configured) return onSetup();
-    const text = await pageSelection();
-    if (text === undefined) return;
-    if (!text) return toast({ text: tr("chat.noSelection"), tone: "info" });
-    react("surprised");
-    send(tr("chat.explainPrompt", { quote: text.replace(/\n/g, "\n> ") }));
-  }
-  async function quoteSelection() {
-    const text = await pageSelection();
-    if (text === undefined) return;
-    if (!text) return toast({ text: tr("chat.noSelection"), tone: "info" });
-    react("surprised");
-    setInput((v) => (v.trim() ? `${v.trimEnd()}\n\n` : "") + tr("chat.askAbout", { quote: text.replace(/\n/g, "\n> ") }));
   }
 
   async function locate(text: string) {
@@ -217,55 +178,59 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   const translating = !!tstate?.active;
   const allModels = providers.filter((p) => p.enabled && usable(p)).map((p) => ({ p, models: p.models }));
 
-  // ---- mascot expression, driven by real app events ----
-  const last = messages[messages.length - 1];
-  const lastStatus = last?.role === "assistant" ? last.status : undefined;
-  const translatingNow = translating && tstate!.done < tstate!.total;
-  useEffect(() => {
-    if (lastStatus === "done") react("done");
-  }, [lastStatus, react]);
-  const prevTranslating = useRef(false);
-  useEffect(() => {
-    if (prevTranslating.current && !translatingNow && translating) react("done");
-    prevTranslating.current = translatingNow;
-  }, [translatingNow, translating, react]);
-  const chatMood: MascotState =
-    lastStatus === "error" ? "error"
-    : lastStatus === "thinking" || (lastStatus === "streaming" && !last!.content) ? "waiting"
-    : lastStatus === "streaming" ? "generating"
-    : flash === "done" ? "done" : "idle";
-  const mood: MascotState =
-    !configured || needsGrant ? "needs-action"
-    : chatMood !== "idle" && chatMood !== "done" ? chatMood
-    : translatingNow ? "translating"
-    : flash ?? (composerFocused ? "typing" : "idle");
-
-  const round = "size-9 rounded-full border border-border bg-background text-foreground/75 hover:bg-muted hover:text-foreground";
   return (
     <div className="flex h-full flex-col">
-      {/* top row: round outlined buttons — new chat · history | translate · settings */}
-      <header className="flex h-14 shrink-0 items-center gap-2 px-3">
-        <IconButton icon={MessageSquarePlus} label={tr("chat.newChat")} className={round} onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
-        <IconButton icon={History} label={tr("chat.history")} className={round} onClick={() => setHistoryOpen(true)} testId="open-history" />
+      {/* top bar: logo · model switch · new · history · settings */}
+      <header className="flex h-12 shrink-0 items-center gap-1 px-2.5">
+        <Logo size={24} />
+        <Dropdown>
+          <DropdownTrigger asChild>
+            <button data-testid="model-switch" className="ml-1 flex h-8 min-w-0 max-w-[48%] items-center gap-1 rounded-btn px-2 text-[13.5px] font-semibold outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="truncate">{chatModel ? chatModel.modelId : tr("chat.noModel")}</span>
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownTrigger>
+          <DropdownContent testId="model-menu">
+            {allModels.length === 0 && <DropdownItem icon={KeyRound} onSelect={onSetup}>{tr("chat.addKey")}</DropdownItem>}
+            {allModels.map(({ p, models }) => (
+              <div key={p.id}>
+                <DropdownLabel>{p.name}</DropdownLabel>
+                {models.map((m) => (
+                  <DropdownItem key={m} testId={`model-option-${m}`} checked={chatModel?.provider.id === p.id && chatModel.modelId === m}
+                    onSelect={() => update((s) => ({ ...s, models: { ...s.models, chat: modelRef(p.id, m), summary: modelRef(p.id, m) } }))}>
+                    {m}
+                  </DropdownItem>
+                ))}
+              </div>
+            ))}
+            <DropdownSeparator />
+            <DropdownItem icon={Settings2} onSelect={() => chrome.runtime.openOptionsPage()}>{tr("chat.manageModels")}</DropdownItem>
+          </DropdownContent>
+        </Dropdown>
         <div className="flex-1" />
-        <IconButton icon={Languages} label={translating ? tr("chat.showOriginal") : tr("chat.translatePage")} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!pageOk}
-          className={cn(round, translating && "border-primary/40 bg-primary-soft text-primary-soft-foreground", "disabled:opacity-40")} />
-        <QuickSettings settings={settings} update={update} tab={tab} host={host} className={round} />
+        <IconButton icon={Languages} label={translating ? tr("chat.showOriginal") : tr("chat.translatePage")} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!pageOk} />
+        <IconButton icon={Plus} label={tr("chat.newChat")} onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
+        <IconButton icon={History} label={tr("chat.history")} onClick={() => setHistoryOpen(true)} testId="open-history" />
+        <QuickSettings settings={settings} update={update} tab={tab} host={host} />
       </header>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {messages.length === 0 ? (
-          <Home mood={mood} tab={tab} host={host} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
-            onExplain={explainSelection} onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
-        ) : (
-          <>
-            {pageOk && <PageChip tab={tab} host={host} className="mt-1 bg-card" />}
-            <div className="space-y-5 pt-4">
-              {messages.map((m, i) => (
-                <MessageItem key={m.id} m={m} mood={i === messages.length - 1 ? chatMood : undefined} onRetry={() => send(messages[i - 1]?.content ?? "", m.kind)} onLocate={locate} />
-              ))}
+        {pageOk && (
+          <div className="mt-1 flex items-center gap-2.5 rounded-card bg-card px-3 py-2.5" data-testid="page-chip">
+            {tab?.favIconUrl ? <img src={tab.favIconUrl} className="size-4 rounded-[4px]" alt="" /> : <Globe className="size-4 text-muted-foreground" />}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium">{tab?.title || host || tr("chat.currentPage")}</div>
+              <div className="truncate text-[12px] text-muted-foreground">{host || tr("chat.noAccessYet")}</div>
             </div>
-          </>
+          </div>
+        )}
+        {messages.length === 0 ? (
+          <EmptyState host={host} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
+            onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
+        ) : (
+          <div className="space-y-5 pt-4">
+            {messages.map((m, i) => <MessageItem key={m.id} m={m} onRetry={() => send(messages[i - 1]?.content ?? "", m.kind)} onLocate={locate} />)}
+          </div>
         )}
       </div>
 
@@ -299,15 +264,13 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
         )}
       </div>
 
-      {/* composer: big rounded box · toolbar icons · model selector + round send (bottom-right) */}
+      {/* composer */}
       <div className="shrink-0 p-3 pt-2">
-        <div className="rounded-[22px] border border-border bg-background shadow-[0_1px_3px_rgb(16_24_40/0.05)] transition focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-ring/40 dark:bg-card">
+        <div className="rounded-card bg-card transition focus-within:ring-2 focus-within:ring-ring">
           <textarea
             data-testid="composer"
-            rows={2}
+            rows={1}
             value={input}
-            onFocus={() => setComposerFocused(true)}
-            onBlur={() => setComposerFocused(false)}
             onChange={(e) => {
               setInput(e.target.value);
               e.target.style.height = "auto";
@@ -320,43 +283,23 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
               }
             }}
             placeholder={tr("chat.placeholder")}
-            className="block max-h-40 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
+            className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3.5 pt-3 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
           />
-          <div className="flex items-center gap-1 px-2.5 pb-2.5">
-            <ToolBtn icon={FileText} label={tr("chat.usePage")} on={usePage && pageOk} disabled={!pageOk} onClick={() => setUsePage((v) => !v)} testId="use-page" />
-            <ToolBtn icon={TextQuote} label={tr("chat.quoteSelection")} disabled={!pageOk} onClick={quoteSelection} testId="quote-selection" />
+          <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
+            <button type="button" onClick={() => setUsePage((v) => !v)} disabled={!pageOk} data-testid="use-page" data-on={usePage && pageOk ? "" : undefined}
+              className={cn("flex h-7 items-center gap-1.5 rounded-btn px-2.5 text-[12px] font-medium transition", usePage && pageOk ? "bg-background text-foreground" : "text-muted-foreground hover:bg-muted")}>
+              <FileText className="size-3.5" />
+              {tr("chat.usePage")}
+              {usePage && pageOk && <Check className="size-3.5 text-primary" strokeWidth={2.6} />}
+            </button>
             <div className="flex-1" />
-            <Dropdown>
-              <DropdownTrigger asChild>
-                <button data-testid="model-switch" className="flex h-8 min-w-0 max-w-[55%] items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                  <span className="truncate">{chatModel ? chatModel.modelId : tr("chat.noModel")}</span>
-                  <ChevronDown className="size-3.5 shrink-0" />
-                </button>
-              </DropdownTrigger>
-              <DropdownContent testId="model-menu">
-                {allModels.length === 0 && <DropdownItem icon={KeyRound} onSelect={onSetup}>{tr("chat.addKey")}</DropdownItem>}
-                {allModels.map(({ p, models }) => (
-                  <div key={p.id}>
-                    <DropdownLabel>{p.name}</DropdownLabel>
-                    {models.map((m) => (
-                      <DropdownItem key={m} testId={`model-option-${m}`} checked={chatModel?.provider.id === p.id && chatModel.modelId === m}
-                        onSelect={() => update((s) => ({ ...s, models: { ...s.models, chat: modelRef(p.id, m), summary: modelRef(p.id, m) } }))}>
-                        {m}
-                      </DropdownItem>
-                    ))}
-                  </div>
-                ))}
-                <DropdownSeparator />
-                <DropdownItem icon={Settings2} onSelect={() => chrome.runtime.openOptionsPage()}>{tr("chat.manageModels")}</DropdownItem>
-              </DropdownContent>
-            </Dropdown>
             {busy ? (
-              <button onClick={() => busy.abort()} className="grid size-9 shrink-0 place-items-center rounded-full bg-foreground text-background transition hover:opacity-85" aria-label={tr("chat.stop")} data-testid="stop">
+              <button onClick={() => busy.abort()} className="grid size-8 place-items-center rounded-btn bg-foreground text-background transition hover:opacity-85" aria-label={tr("chat.stop")} data-testid="stop">
                 <Square className="size-3 fill-current" />
               </button>
             ) : (
               <button onClick={() => send(input)} disabled={!input.trim()} data-testid="send" aria-label={tr("chat.send")}
-                className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-input disabled:text-muted-foreground">
+                className="grid size-8 place-items-center rounded-btn bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-input disabled:text-muted-foreground">
                 <ArrowUp className="size-4" strokeWidth={2.4} />
               </button>
             )}
@@ -377,31 +320,8 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   );
 }
 
-function ToolBtn({ icon: Icon, label, on, disabled, onClick, testId }: { icon: typeof FileText; label: string; on?: boolean; disabled?: boolean; onClick: () => void; testId: string }) {
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} title={label} aria-label={label} aria-pressed={on ?? undefined} data-testid={testId} data-on={on ? "" : undefined}
-      className={cn("grid size-8 place-items-center rounded-full transition disabled:opacity-40", on ? "bg-primary-soft text-primary-soft-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
-      <Icon className="size-[17px]" strokeWidth={1.9} />
-    </button>
-  );
-}
-
-function PageChip({ tab, host, className }: { tab: TabInfo | null; host: string; className?: string }) {
-  return (
-    <div className={cn("flex items-center gap-2.5 rounded-card px-3 py-2.5", className)} data-testid="page-chip">
-      <span className="grid size-7 shrink-0 place-items-center rounded-[8px] bg-background/80 dark:bg-white/10">
-        {tab?.favIconUrl ? <img src={tab.favIconUrl} className="size-4 rounded-[4px]" alt="" /> : <Globe className="size-4 text-muted-foreground" />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">{tab?.title || host || tr("chat.currentPage")}</div>
-        <div className="truncate text-[12px] text-muted-foreground">{host || tr("chat.noAccessYet")}</div>
-      </div>
-    </div>
-  );
-}
-
 /** Level-1 settings: a popover with only the most frequently changed switches. */
-function QuickSettings({ settings, update, tab, host, className }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; tab: TabInfo | null; host: string; className?: string }) {
+function QuickSettings({ settings, update, tab, host }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; tab: TabInfo | null; host: string }) {
   const t = settings.translation;
   const auto = !!host && t.autoSites.includes(host);
   const setT = (patch: Partial<Settings["translation"]>) => update((s) => ({ ...s, translation: { ...s.translation, ...patch } }));
@@ -417,7 +337,7 @@ function QuickSettings({ settings, update, tab, host, className }: { settings: S
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <IconButton icon={Settings2} label={tr("qs.title")} testId="open-quick-settings" className={className} />
+        <IconButton icon={Settings2} label={tr("qs.title")} testId="open-quick-settings" />
       </PopoverTrigger>
       <PopoverContent testId="quick-settings">
         <div className="space-y-3.5">
@@ -446,30 +366,25 @@ function QuickSettings({ settings, update, tab, host, className }: { settings: S
   );
 }
 
-/** Home / empty state (Kimi-style): mascot + headline, a soft card with the current page, then quick actions. */
-function Home(p: { mood: MascotState; tab: TabInfo | null; host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onExplain: () => void; onKeyPoints: () => void }) {
-  const actions = [
+function EmptyState(p: { host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onKeyPoints: () => void }) {
+  const chips = [
     { icon: FileText, label: tr("chat.summarizePage"), onClick: p.onSummarize, testId: "action-summarize" },
     { icon: Languages, label: p.translating ? tr("chat.showOriginal") : tr("chat.translatePage"), onClick: p.onTranslate, testId: "action-translate" },
-    { icon: ScanText, label: tr("chat.explainSelection"), onClick: p.onExplain, testId: "action-explain" },
     { icon: ListChecks, label: tr("chat.keyPoints"), onClick: p.onKeyPoints, testId: "action-keypoints" },
   ];
   return (
-    <div className="animate-in px-1 pt-5" data-testid="home">
-      <Mascot state={p.mood} size={60} />
-      <h1 className="mt-3 text-[25px] font-semibold leading-[1.3] tracking-tight">{tr("chat.homeTitle")}</h1>
-      <div className="mt-5 overflow-hidden rounded-[20px] border border-primary/10 p-1.5 dark:border-white/5" style={{ background: "var(--home-card)" }} data-testid="home-card">
-        {p.pageOk && <PageChip tab={p.tab} host={p.host} className="bg-background/70 dark:bg-black/20" />}
-        <div className="px-3 pb-2.5 pt-2.5 text-[13px] leading-6 text-foreground/70">{p.pageOk ? tr("chat.emptyDesc", { lang: p.targetLang }) : tr("chat.emptyRestricted")}</div>
+    <div className="animate-in pt-10">
+      <div className="px-1">
+        <div className="text-[22px] font-semibold tracking-tight">{tr("chat.emptyTitle")}</div>
+        <div className="mt-1.5 text-[13.5px] leading-6 text-muted-foreground">{p.pageOk ? tr("chat.emptyDesc", { lang: p.targetLang }) : tr("chat.emptyRestricted")}</div>
       </div>
       {p.pageOk && (
-        <div className="mt-3 space-y-0.5">
-          {actions.map((c) => (
-            <button key={c.testId} data-testid={c.testId} onClick={c.onClick}
-              className="group flex w-full items-center gap-3 rounded-[14px] px-3 py-3 text-left text-[14.5px] transition hover:bg-card active:scale-[0.99]">
-              <c.icon className="size-[18px] shrink-0 text-foreground/70" strokeWidth={1.8} />
-              <span className="flex-1 truncate">{c.label}</span>
-              <ArrowRight className="size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
+        <div className="mt-5 flex flex-wrap gap-2">
+          {chips.map((c) => (
+            <button key={c.label} data-testid={c.testId} onClick={c.onClick}
+              className="flex h-9 items-center gap-1.5 rounded-btn bg-card px-3 text-[13px] font-medium transition hover:bg-card-strong active:scale-[0.98]">
+              <c.icon className="size-4 text-primary" strokeWidth={1.9} />
+              {c.label}
             </button>
           ))}
         </div>
@@ -478,7 +393,7 @@ function Home(p: { mood: MascotState; tab: TabInfo | null; host: string; pageOk:
   );
 }
 
-function MessageItem({ m, mood, onRetry, onLocate }: { m: Msg; mood?: MascotState; onRetry: () => void; onLocate: (text: string) => void }) {
+function MessageItem({ m, onRetry, onLocate }: { m: Msg; onRetry: () => void; onLocate: (text: string) => void }) {
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const footnotes = () => [...(ref.current?.querySelectorAll("section[data-footnotes] li") ?? [])].map((li) => li.textContent?.replace(/↩\s*$/, "").trim() ?? "");
@@ -506,7 +421,6 @@ function MessageItem({ m, mood, onRetry, onLocate }: { m: Msg; mood?: MascotStat
     );
   return (
     <div className="animate-in" data-testid="assistant-message" data-status={m.status}>
-      <Mascot state={mood ?? "idle"} still={!mood} size={22} className="mb-1.5" />
       {m.status === "error" ? (
         <div className="rounded-card bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
           {m.content && <div className="md mb-2 opacity-80"><SafeMarkdown>{m.content}</SafeMarkdown></div>}

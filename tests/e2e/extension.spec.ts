@@ -264,41 +264,6 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await page.close();
   });
 
-  test("home (Kimi-style): mascot + quick actions; 解释选中内容 and 引用选中内容 use the page selection", async () => {
-    const page = await openArticle();
-    const panel = await openPanel(article);
-    const home = panel.getByTestId("home");
-    await expect(home.getByTestId("mascot")).toHaveAttribute("data-state", "idle");
-    await expect(home.locator("h1")).toHaveText("让翻翻帮你读懂网页");
-    for (const id of ["action-summarize", "action-translate", "action-explain", "action-keypoints"]) await expect(panel.getByTestId(id)).toBeVisible();
-    // typing → the mascot looks down at the input
-    await panel.getByTestId("composer").focus();
-    await expect(home.getByTestId("mascot")).toHaveAttribute("data-state", "typing");
-    await panel.getByTestId("composer").blur();
-    // nothing selected → a hint, no request
-    const before = (await stats()).chatRequests;
-    await panel.getByTestId("action-explain").click();
-    await expect(panel.getByText("先在网页上选中一段文字")).toBeVisible();
-    expect((await stats()).chatRequests).toBe(before);
-    await page.evaluate(() => {
-      const p = [...document.querySelectorAll("article p")].find((x) => x.textContent!.includes("A vegetated roof works like a sponge"))!;
-      const r = document.createRange();
-      r.selectNodeContents(p);
-      getSelection()!.removeAllRanges();
-      getSelection()!.addRange(r);
-    });
-    await panel.getByTestId("quote-selection").click();
-    await expect(panel.getByTestId("composer")).toHaveValue(/> A vegetated roof works like a sponge/);
-    await panel.getByTestId("composer").fill("");
-    await panel.getByTestId("action-explain").click();
-    const msg = panel.getByTestId("assistant-message").last();
-    await expect(msg).toHaveAttribute("data-status", "done", { timeout: 20_000 });
-    await expect(panel.getByText(/^请用通俗易懂的话解释[\s\S]*A vegetated roof works like a sponge/)).toBeVisible(); // the user turn carries the selection
-    await expect(msg.getByTestId("mascot")).toBeVisible(); // small mascot avatar
-    await panel.close();
-    await page.close();
-  });
-
   test("real side panel opens from page gestures (fab, 发到侧栏追问), 用翻翻追问 menu, and the toast fallback", async () => {
     test.setTimeout(90_000);
     for (const p of context.pages()) if (p.url().startsWith("chrome-extension://")) await p.close();

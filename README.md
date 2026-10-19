@@ -21,7 +21,7 @@ BYOK（用你自己的 API Key），纯客户端，没有服务器。
 
 ### 界面层级
 
-- **主界面（侧栏）**：参照 Kimi 插件的布局。顶部一排圆形描边按钮（左：新对话、历史；右：翻译开关、⚙）；空状态是吉祥物 + 大标题、一张柔和的当前页面卡片、快捷操作列表（总结本页 / 翻译本页 / 解释选中内容 / 提取要点）；底部大圆角输入框，左下是「引用本页」「引用选中内容」，右下是模型切换和圆形发送按钮。
+- **主界面（侧栏）**：只有对话、顶部模型切换、翻译开关、新对话、历史、⚙。
 - **一级 · ⚙ 快捷设置浮层**：目标语言、显示方式（双语 / 仅译文）、本站自动翻译、“更多设置 →”。
 - **二级 · 设置页**（`options.html`，左侧导航）：模型与密钥 / 翻译 / 对话与提示词 / 外观 / 快捷键 / 数据与隐私。
 - **三级**：Provider 详情（展开卡片）、批大小 / 并发 / 站点规则 / 排除元素、提示词模板、缓存与导入导出——都在默认收起、标注“高级”的折叠面板里。
@@ -78,43 +78,11 @@ Options 页                              Content Script（按需注入）：段�
 ```
 entrypoints/   background.ts · content.ts · sidepanel/ · options/
 src/lib/       providers / settings / llm(pi-ai) / batch / cache / db / paragraphs / extract / prompts / page-ui
-src/ui/        App · ChatView · Onboarding · options/OptionsApp · components/ui（shadcn 风格）· mascot/Mascot · dev/MascotGallery（仅 e2e 构建）
-assets/mascot/ 设计师的分层吉祥物 SVG
+src/ui/        App · ChatView · Onboarding · options/OptionsApp · components/ui（shadcn 风格）
 tests/unit/    vitest：批处理、缓存、Key 处理、设置默认值、段落收集
 tests/e2e/     Playwright：引导、对话、全文翻译、划词翻译、设置层级、长流式
 scripts/       check-permissions.mjs · permissions.allowlist.json · make-icons.mjs · screenshots.mjs
 ```
-
-## 吉祥物「翻翻」
-
-组件 `src/ui/mascot/Mascot.tsx`，美术文件 `assets/mascot/fanfan-layered.svg`（构建时以文本内联，换图不用改代码）。工具栏 / 商店图标是设计师给的 `public/icon/{16,32,48,128}.png`（`scripts/make-icons.mjs` 会用 `public/icon.svg` 覆盖它们，别随手跑）。
-
-**SVG 图层约定**（viewBox 0 0 128 128）：
-
-| 节点 | 作用 |
-|---|---|
-| `#ff-body` | 静态：`#ff-leaf` 绿色翻页角、身体、`#ff-sheen` 高光（单独一层，可替换）、`#ff-rim` |
-| `#ff-face`（或 `#ff-eyes`） | 眼睛层。跟随鼠标时整体平移，最大 x 9 / y 7，身体内要留出这个余量 |
-| `#ff-face > [data-state="…"]` | 每种表情一个子组；组件只显示匹配的那个，其余设 `display="none"`。没画的表情回退到 `idle` 子组，再叠加代码里的动作。眨眼 = 对 `idle` 子组里的形状做 scaleY |
-
-同样的规则适用于任何子节点带 `data-state` 的组（比如以后在 `#ff-eye-left/right` 里分别放每个状态的形状）。id 会按实例加前缀，同页多个吉祥物的渐变不会冲突。不要在 SVG 里对这些 id 写动画，`transform` 由组件控制。
-
-**状态**（只有一个 `state` prop，由聊天和翻译的真实事件驱动）：
-
-| state | 用的画稿（按顺序找） | 代码里的动作 | 触发 |
-|---|---|---|---|
-| `idle` | idle | 跟随鼠标、随机眨眼；鼠标离开侧栏时先朝左看网页再回正；60 秒无操作进入 sleeping | 默认 |
-| `typing` | typing / listening | 看向下方输入框 | 输入框获得焦点 |
-| `waiting` | waiting / thinking | 横条眼左右扫 | 已发送、首个 token 未到 |
-| `generating` | generating / working | 轻微上下弹 | 流式输出中 |
-| `translating` | translating / working | 看向左边网页 | 整页翻译进行中 |
-| `done` | done | `^ ^` + 小跳约 1 秒，然后回 idle | 回答或翻译完成 |
-| `needs-action` | needs-action / needs-you | 歪头 | 没配 Key、需要站点权限 |
-| `error` | error | 眼睛下垂、摇头一次 | 请求失败 |
-| `sleeping` | sleeping / sleep | 闭眼；鼠标移入侧栏时醒来 | idle 超过 60 秒 |
-| `surprised` | surprised / listening | 眼睛放大约 0.9 秒 | 收到页面选中的文字 |
-
-开启 `prefers-reduced-motion` 时只切换画稿，不跟随、不眨眼、不弹跳。每个实例一个 rAF 循环，表情稳定后停止。e2e 构建里打开 `sidepanel.html#mascot-gallery`（或 `#mascot-gallery-dark`）可以看到全部表情，`npm run screenshots` 会输出 `*-12-mascot-gallery.png` 和 `*-13-mascot-gallery-reduced-motion.png`。
 
 ## 界面文案（i18n）
 

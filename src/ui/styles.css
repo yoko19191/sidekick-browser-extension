@@ -19,8 +19,6 @@
   --primary-soft-foreground: #4338ca;
   --destructive: #e11d48;
   --ring: rgb(79 70 229 / 0.35);
-  --accent-green: #16a34a;     /* translation green (matches the in-page green style) */
-  --home-card: linear-gradient(135deg, #eef0ff 0%, #f1f5ff 55%, #ecfdf3 100%);
 }
 .dark {
   --background: #16161a;      /* not pure black */
@@ -39,8 +37,6 @@
   --primary-soft-foreground: #c7d2fe;
   --destructive: #fb7185;
   --ring: rgb(129 140 248 / 0.45);
-  --accent-green: #34d399;
-  --home-card: linear-gradient(135deg, rgb(99 102 241 / 0.18) 0%, rgb(99 102 241 / 0.08) 55%, rgb(52 211 153 / 0.12) 100%);
 }
 
 @theme inline {
@@ -62,7 +58,6 @@
   --color-primary-soft-foreground: var(--primary-soft-foreground);
   --color-destructive: var(--destructive);
   --color-ring: var(--ring);
-  --color-accent-green: var(--accent-green);
   /* radii: cards & inputs 16px, buttons & tags 10px, small controls 8px */
   --radius-card: 16px;
   --radius-btn: 10px;
@@ -115,16 +110,3 @@ body {
 .md section[data-footnotes] li { @apply cursor-pointer rounded-[6px] hover:text-foreground; }
 .md section[data-footnotes] a[data-footnote-backref] { display: none; }
 .md .md-img-link { @apply inline-flex items-center gap-1 rounded-[6px] bg-muted px-1.5 py-0.5 text-[12px] text-muted-foreground no-underline; }
-
-/* mascot (art contract + states: src/ui/mascot/Mascot.tsx). Wrapper-level motion only; eyes are driven by rAF. */
-.mascot { display: inline-block; flex-shrink: 0; line-height: 0; transition: transform 0.35s cubic-bezier(0.3, 1.4, 0.5, 1), opacity 0.3s; }
-.mascot > svg { width: 100%; height: 100%; display: block; overflow: visible; }
-.mascot-done { animation: mascot-hop 0.6s cubic-bezier(0.3, 1.6, 0.5, 1); }
-.mascot-error { animation: mascot-shake 0.5s ease-in-out; }
-.mascot-needs-action { transform: rotate(-9deg); }
-.mascot-sleeping { opacity: 0.85; }
-/* dark panel: a faint halo so the indigo body separates from the near-black background */
-.dark .mascot > svg { filter: drop-shadow(0 0 0.5px rgb(255 255 255 / 0.35)) drop-shadow(0 2px 10px rgb(129 140 248 / 0.25)); }
-@keyframes mascot-hop { 0%, 100% { transform: none; } 40% { transform: translateY(-12%) scale(1.04); } }
-@keyframes mascot-shake { 0%, 100% { transform: none; } 20% { transform: translateX(-6%) rotate(-4deg); } 45% { transform: translateX(5%) rotate(3deg); } 70% { transform: translateX(-3%); } }
-@media (prefers-reduced-motion: reduce) { .mascot { transition: none; } .mascot-done, .mascot-error { animation: none; } }

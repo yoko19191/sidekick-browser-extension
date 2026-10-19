@@ -35,9 +35,7 @@ for (const scheme of ["light", "dark"] as const) {
     // main panel (empty state)
     const panel = await openPanel(context, extId, article);
     await panel.getByTestId("action-summarize").waitFor();
-    await panel.mouse.move(330, 300); // the mascot glances toward the pointer
-    await panel.waitForTimeout(600);
-    await shot(panel, "03-home");
+    await shot(panel, "03-main-panel");
 
     // level 1: gear popover
     await panel.getByTestId("open-quick-settings").click();
@@ -101,20 +99,6 @@ for (const scheme of ["light", "dark"] as const) {
     await adv.scrollIntoViewIfNeeded();
     await opt.waitForTimeout(250);
     await shot(opt, "11-settings-L3-translation-advanced");
-
-    // dev-only mascot expression gallery (every state), normal + reduced-motion
-    const gal = await context.newPage();
-    await gal.setViewportSize({ width: 900, height: 420 });
-    await gal.goto(`chrome-extension://${extId}/sidepanel.html#mascot-gallery${scheme === "dark" ? "-dark" : ""}`);
-    await gal.getByTestId("mascot-gallery").waitFor();
-    await gal.waitForTimeout(1200);
-    await gal.screenshot({ path: `${OUT}/${scheme}-12-mascot-gallery.png`, fullPage: true });
-    await gal.emulateMedia({ reducedMotion: "reduce" });
-    await gal.reload();
-    await gal.getByTestId("mascot-gallery").waitFor();
-    await gal.waitForTimeout(300);
-    await gal.screenshot({ path: `${OUT}/${scheme}-13-mascot-gallery-reduced-motion.png`, fullPage: true });
-    await gal.close();
 
     // composite: page + panel side by side, like the real browser
     await page.evaluate(() => getSelection()?.removeAllRanges());
