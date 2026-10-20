@@ -101,6 +101,63 @@ describe("WebAgent on pi-agent-core", () => {
     expect(seen[0].split("</untrusted_page_content>").length - 1).toBe(1);
   });
 
+  it("delete needs confirmation every time even after allow-kind", async () => {
+    const confirm = vi.fn(async () => "allow-kind" as const);
+    const { agent, page } = setup([
+      turn(call("click", { index: "d" })),
+      turn(call("click", { index: "d" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { d: { index: "d", tag: "button", text: "删除" } }, { confirm });
+    await agent.run("del");
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(page.executed).toEqual(["click", "click"]);
+  });
+
+  it("allow-kind on a confirm button skips the next same button but not delete", async () => {
+    const confirm = vi.fn(async () => "allow-kind" as const);
+    const { agent } = setup([
+      turn(call("click", { index: "c" })),
+      turn(call("click", { index: "c" })),
+      turn(call("click", { index: "d" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { c: { index: "c", tag: "button", text: "Confirm" }, d: { index: "d", tag: "button", text: "Delete" } }, { confirm });
+    await agent.run("x");
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("truncates when the driver reports a big DOM change on the same URL", async () => {
+    const { agent, page } = setup([
+      turn(call("click", { index: "a" }), call("click", { index: "a" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { a: { index: "a", tag: "button", text: "open" } });
+    (agent as any).opts.driver.domChanged = async () => true;
+    await agent.run("x");
+    expect(page.executed).toEqual(["click"]);
+  });
+
+  it("last step offers only done and says so", async () => {
+    const { agent, seen } = setup([
+      turn(call("scroll", { down: true })),
+      turn(call("done", { text: "partial", success: false })),
+    ]);
+    (agent as any).opts.maxSteps = 2;
+    const r = await agent.run("x");
+    expect(r.status).toBe("done");
+    expect(seen[1]).toContain("last step");
+  });
+
+  it("nudges after the same action repeats 3 times", async () => {
+    const { agent, seen } = setup([
+      turn(call("scroll", { down: true })),
+      turn(call("scroll", { down: true })),
+      turn(call("scroll", { down: true })),
+      turn(call("done", { text: "ok", success: true })),
+    ]);
+    await agent.run("x");
+    expect(seen[3]).toContain("repeated scroll");
+    expect(seen[2]).not.toContain("repeated scroll");
+  });
+
   it("caps at 5 actions per step", async () => {
     const { agent, page } = setup([
       turn(...Array.from({ length: 7 }, () => call("scroll", { down: true }))),

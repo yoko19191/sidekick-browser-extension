@@ -53,6 +53,8 @@ export class WebAgent {
   private turn = new WeakMap<object, { count: number; truncated: boolean; record: StepRecord }>();
   private doneResult?: { success: boolean; text: string };
   private stopped = false;
+  private recent: string[] = [];
+  private nudge = "";
 
   constructor(private readonly opts: WebAgentOptions) {
     const { driver, hooks } = opts;
@@ -67,13 +69,19 @@ export class WebAgent {
         const snap = await driver.snapshot(signal);
         this.stepUrl = snap.url;
         const kept = messages.filter((m) => !isStateMessage(m));
+        const last = this.steps + 1 >= this.maxSteps;
+        const notes = [
+          this.nudge,
+          last ? "This is the last step: call done now and report what was finished and what was not." : "",
+        ].filter(Boolean).map((n) => `<note>${n}</note>`).join("\n");
+        this.nudge = "";
         const state = `${STATE_MARKER} step="${this.steps + 1}" max_steps="${this.maxSteps}">
 url: ${escapePageText(snap.url)}
 title: ${escapePageText(snap.title)}
 <untrusted_page_content>
 ${escapePageText(snap.tree)}
 </untrusted_page_content>
-</browser_state>`;
+</browser_state>${notes ? "\n" + notes : ""}`;
         return [...kept, { role: "user", content: [{ type: "text", text: state }], timestamp: Date.now() } as AgentMessage];
       },
 
@@ -115,7 +123,17 @@ ${escapePageText(snap.tree)}
         t.record.actions.push({ name: toolCall.name, args, ok: !result.isError, message: msg });
         if (toolCall.name === "done") this.doneResult = { success: !!(result.details as any)?.success, text: msg };
         if (TERMINATES.has(toolCall.name) || (await driver.currentUrl()) !== this.stepUrl) t.truncated = true;
+        else if (toolCall.name !== "ask_user" && (await driver.domChanged?.())) t.truncated = true;
+        const sig = `${toolCall.name}:${JSON.stringify(args)}`;
+        this.recent = [...this.recent, sig].slice(-3);
+        if (this.recent.length === 3 && this.recent.every((x) => x === sig))
+          this.nudge = `You have repeated ${toolCall.name} with the same arguments 3 times. It is probably not working; try a different approach or ask_user.`;
         return undefined;
+      },
+
+      prepareNextTurnWithContext: ({ context }) => {
+        if (this.steps + 1 < this.maxSteps) return undefined;
+        return { context: { ...context, tools: (context.tools ?? []).filter((t) => t.name === "done") } };
       },
 
       finishTurn: ({ message }) => {

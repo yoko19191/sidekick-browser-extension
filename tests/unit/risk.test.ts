@@ -25,7 +25,7 @@ describe("risk classify", () => {
   });
   it("allow-kind downgrades R2 but never R3", () => {
     const v = classify({ name: "click", args: { index: "1" } }, { index: "1", tag: "button", text: "x", isSubmit: true }, ctx);
-    expect(effectiveLevel(v, new Set(["submit"]))).toBe(1);
+    expect(effectiveLevel(v, new Set(["submit:example.com"]))).toBe(1);
     expect(effectiveLevel({ level: 3, reason: "", kind: "submit" }, new Set(["submit"]))).toBe(3);
   });
 });
