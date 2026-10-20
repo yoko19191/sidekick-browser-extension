@@ -28,4 +28,15 @@ describe("risk classify", () => {
     expect(effectiveLevel(v, new Set(["submit:example.com"]))).toBe(1);
     expect(effectiveLevel({ level: 3, reason: "", kind: "submit" }, new Set(["submit"]))).toBe(3);
   });
+  it("Enter in a payment or delete form always asks, even when submit was allowed for the task", () => {
+    const allowed = new Set(["submit:example.com"]);
+    const enter = { name: "send_keys", args: { index: "1", keys: "Enter" } };
+    const pay = classify(enter, { index: "1", tag: "input", text: "", inForm: true, formSubmitText: "Pay now" }, ctx);
+    expect(pay.kind).toBeUndefined();
+    expect(effectiveLevel(pay, allowed)).toBe(2);
+    const del = classify(enter, { index: "1", tag: "input", text: "", inForm: true, formSubmitText: "Delete account" }, ctx);
+    expect(effectiveLevel(del, allowed)).toBe(2);
+    const plain = classify(enter, { index: "1", tag: "input", text: "", inForm: true, formSubmitText: "Search" }, ctx);
+    expect(effectiveLevel(plain, allowed)).toBe(1);
+  });
 });

@@ -80,6 +80,11 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
       return { level: 1, reason: "fills a normal field" };
     case "send_keys": {
       const keys = String(a.keys ?? "");
+      if (keys === "Enter" && target?.inForm && target.formSubmitText) {
+        const f = target.formSubmitText;
+        if (DESTRUCTIVE.test(f)) return { level: 2, reason: `Enter submits a form whose button "${f.slice(0, 30)}" deletes something; confirm every time` };
+        if (PAYMENT.test(f)) return { level: 2, reason: `Enter submits a form whose button "${f.slice(0, 30)}" involves payment; confirm every time` };
+      }
       if (keys === "Enter" && target?.inForm) return { level: 2, reason: "Enter inside a form submits it", kind: `submit:${siteOf(ctx.currentUrl)}` };
       return { level: 1, reason: "key press" };
     }
