@@ -142,8 +142,8 @@ export function startMock(port = 0) {
         const calls = body.messages.flatMap((m) => m.tool_calls ?? []).map((c) => c.function.name);
         const id = (re) => all.match(re)?.[1];
         let call;
-        if (!calls.includes("input")) call = { name: "input", args: { index: id(/\[(f\d+:\d+)\]<input type=text/), text: "Ada" } };
-        else if (!calls.includes("click") && toolNames.includes("click")) call = { name: "click", args: { index: id(/\[(f\d+:\d+)\]<button[^>]*>Submit/) } };
+        if (!calls.includes("input")) call = { name: "input", args: { index: id(/\[(f\d+:\d+)\][<‹]input type=text/), text: "Ada" } };
+        else if (!calls.includes("click") && toolNames.includes("click")) call = { name: "click", args: { index: id(/\[(f\d+:\d+)\][<‹]button[^>›]*[>›]Submit/) } };
         else call = { name: "done", args: { success: true, text: "submitted" } };
         const a = JSON.stringify(call.args);
         res.write(`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${stats.agentRequests}`, type: "function", function: { name: call.name, arguments: a } }] }, finish_reason: null }] })}\n\n`);
