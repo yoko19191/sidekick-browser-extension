@@ -41,11 +41,24 @@ function isInteractive(el: Element): boolean {
 export function isSensitive(el: Element): boolean {
   if (el.tagName.toLowerCase() !== "input" && el.tagName.toLowerCase() !== "textarea") return false;
   const i = el as HTMLInputElement;
-  if (i.type === "password") return true;
+  if (i.type === "password" || i.type === "file") return true;
   const ac = i.getAttribute("autocomplete") ?? "";
   if (SENSITIVE_AUTOCOMPLETE.test(ac)) return true;
   const hint = `${i.name} ${i.id} ${i.placeholder} ${i.getAttribute("aria-label") ?? ""}`;
   return SENSITIVE_NAME.test(hint);
+}
+
+/** Covered by another element at its centre (cookie bars, overlays). Needs layout; false when unknown. */
+export function isOccluded(el: Element): boolean {
+  const r = (el as HTMLElement).getBoundingClientRect?.();
+  if (!r || r.width === 0 || r.height === 0) return false;
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const doc = el.ownerDocument;
+  const win = doc.defaultView;
+  if (!win || x < 0 || y < 0 || x > win.innerWidth || y > win.innerHeight) return false;
+  const root = el.getRootNode() as Document | ShadowRoot;
+  const hit = (root.elementFromPoint ?? doc.elementFromPoint).call(root, x, y);
+  return !!hit && hit !== el && !el.contains(hit) && !hit.contains(el);
 }
 
 function clean(s: string | null | undefined, max = MAX_TEXT): string {
@@ -136,6 +149,7 @@ export class PageObserver {
       isSubmit,
       sensitive: isSensitive(el),
       href: tag === "a" ? (el as HTMLAnchorElement).href : undefined,
+      occluded: isOccluded(el),
     };
   }
 
@@ -166,6 +180,7 @@ export class PageObserver {
           if (info.type) attrs.push(`type=${info.type}`);
           if (info.role) attrs.push(`role=${info.role}`);
           if (info.sensitive) attrs.push("sensitive");
+          if (isOccluded(el)) attrs.push("occluded");
           if (tag === "select") {
             const opts = Array.from((el as HTMLSelectElement).options).slice(0, 12).map((o) => clean(o.text, 30));
             attrs.push(`options="${opts.join("|")}"`);
@@ -227,6 +242,7 @@ export class PageObserver {
       switch (a.name) {
         case "click": {
           el!.scrollIntoView?.({ block: "center" });
+          if (isOccluded(el!)) return { ok: false, message: `element ${args.index} is covered by another element; close the overlay first` };
           el!.focus?.();
           el!.click();
           return { ok: true, message: `clicked ${args.index}` };
