@@ -13,6 +13,8 @@ export interface ElementInfo {
   isSubmit?: boolean; // button[type=submit] / input[type=submit] inside a form
   sensitive?: boolean; // password / card / otp field (spec §7.1)
   href?: string;
+  /** Text of the submit button(s) of the enclosing form, so Enter can be classified like a click on them. */
+  formSubmitText?: string;
 }
 
 export interface PageSnapshot {
@@ -40,6 +42,8 @@ export interface PageDriver {
   describe(index: string): Promise<ElementInfo | undefined>;
   execute(action: ActionRequest, signal?: AbortSignal): Promise<ActionResult>;
   currentUrl(): Promise<string>;
+  /** Optional: true when the DOM changed substantially since the last snapshot (modal opened, SPA view swap). */
+  domChanged?(): Promise<boolean>;
 }
 
 export interface ConfirmRequest {
