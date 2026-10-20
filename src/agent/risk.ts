@@ -2,6 +2,10 @@
 import { getDomain } from "tldts";
 import type { ActionRequest, ElementInfo, RiskLevel } from "./types";
 
+/** Always ask, never covered by "allow this kind" (deletion and money). */
+const DESTRUCTIVE = /删除|移除|清空|注销|销户|\b(delete|remove|erase|wipe|close account|deactivate)\b/i;
+const PAYMENT = /购买|支付|付款|下单|结算|转账|充值|\b(buy|purchase|pay|checkout|place order|transfer|top.?up)\b/i;
+
 const CONSEQUENTIAL =
   /提交|发送|发布|购买|支付|付款|下单|删除|确认|授权|订阅|转账|注销|\b(submit|send|post|publish|buy|purchase|pay|checkout|order|delete|remove|confirm|authori[sz]e|subscribe|transfer)\b/i;
 
@@ -40,7 +44,7 @@ export interface RiskContext {
 export interface RiskVerdict {
   level: RiskLevel;
   reason: string;
-  /** Stable key for "allow this kind for the rest of the task". */
+  /** Stable key for "allow this kind for the rest of the task". Absent on R2 = ask every time. */
   kind?: string;
 }
 
@@ -76,14 +80,17 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
       return { level: 1, reason: "fills a normal field" };
     case "send_keys": {
       const keys = String(a.keys ?? "");
-      if (keys === "Enter" && target?.inForm) return { level: 2, reason: "Enter inside a form submits it", kind: "submit" };
+      if (keys === "Enter" && target?.inForm) return { level: 2, reason: "Enter inside a form submits it", kind: `submit:${siteOf(ctx.currentUrl)}` };
       return { level: 1, reason: "key press" };
     }
     case "click": {
       if (target?.href && isForbiddenUrl(target.href, never)) return { level: 3, reason: "link leads to a site on the never-act list" };
-      if (target?.isSubmit) return { level: 2, reason: "submits a form", kind: "submit" };
+      const btn = `${target?.text ?? ""} ${target?.role ?? ""}`;
+      if (DESTRUCTIVE.test(btn)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" deletes something; confirm every time` };
+      if (PAYMENT.test(btn)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" involves payment; confirm every time` };
+      if (target?.isSubmit) return { level: 2, reason: "submits a form", kind: `submit:${siteOf(ctx.currentUrl)}` };
       const label = `${target?.text ?? ""} ${target?.role ?? ""}`;
-      if (CONSEQUENTIAL.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" may have consequences`, kind: "consequential" };
+      if (CONSEQUENTIAL.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" may have consequences`, kind: `consequential:${siteOf(ctx.currentUrl)}:${(target?.text ?? "").trim().toLowerCase().slice(0, 30)}` };
       if (target?.href && /^https?:/i.test(target.href) && siteOf(target.href) !== ctx.startSite)
         return { level: 2, reason: `link leads to another site: ${siteOf(target.href)}`, kind: `cross-site:${siteOf(target.href)}` };
       return { level: 1, reason: "ordinary click" };

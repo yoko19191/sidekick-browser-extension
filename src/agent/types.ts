@@ -40,6 +40,8 @@ export interface PageDriver {
   describe(index: string): Promise<ElementInfo | undefined>;
   execute(action: ActionRequest, signal?: AbortSignal): Promise<ActionResult>;
   currentUrl(): Promise<string>;
+  /** Optional: true when the DOM changed substantially since the last snapshot (modal opened, SPA view swap). */
+  domChanged?(): Promise<boolean>;
 }
 
 export interface ConfirmRequest {
