@@ -203,10 +203,13 @@ export class PageObserver {
             const d = (el as HTMLIFrameElement).contentDocument;
             if (d?.body) walk(d.body, this.frameIndex(d), depth + 1);
           } catch {
-            /* cross-origin: skipped */
+            /* cross-origin */
           }
+          if (!this.sameOrigin(el as HTMLIFrameElement)) push(`${pad}[unreachable: cross-origin iframe ${clean((el as HTMLIFrameElement).src, 60)}; content exists but cannot be read or operated]`);
           continue;
         }
+        if (tag.includes("-") && !(el as HTMLElement).shadowRoot && el.childNodes.length === 0 && this.doc.defaultView?.customElements?.get(tag))
+          push(`${pad}[unreachable: <${tag}> has a closed shadow root; content exists but cannot be read or operated]`);
         if ((el as HTMLElement).shadowRoot) walk((el as HTMLElement).shadowRoot!, frame, depth + 1);
         if (!isInteractive(el) || tag === "label" || el.querySelector("input,select,textarea,button,a[href]")) walk(el, frame, depth + 1);
       }
@@ -218,6 +221,14 @@ export class PageObserver {
     this.lastIds = seen;
     this.mutations = 0;
     return { url: this.doc.location?.href ?? "", title: this.doc.title, tree: lines.join("\n"), newIds };
+  }
+
+  private sameOrigin(f: HTMLIFrameElement): boolean {
+    try {
+      return !!f.contentDocument;
+    } catch {
+      return false;
+    }
   }
 
   describe(id: string): ElementInfo | undefined {
