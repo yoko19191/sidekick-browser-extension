@@ -134,6 +134,23 @@ export function startMock(port = 0) {
       const last = body.messages[body.messages.length - 1];
       const lastText = typeof last.content === "string" ? last.content : last.content.map((p) => p.text ?? "").join("");
       const out = sse(res);
+      const toolNames = Array.isArray(body.tools) ? body.tools.map((t) => t.function?.name) : [];
+      if (toolNames.includes("done")) {
+        // scripted web-action agent: fill the name field, click submit, then finish
+        stats.agentRequests = (stats.agentRequests ?? 0) + 1;
+        const all = body.messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))).join("\n");
+        const calls = body.messages.flatMap((m) => m.tool_calls ?? []).map((c) => c.function.name);
+        const id = (re) => all.match(re)?.[1];
+        let call;
+        if (!calls.includes("input")) call = { name: "input", args: { index: id(/\[(f\d+:\d+)\]<input type=text/), text: "Ada" } };
+        else if (!calls.includes("click") && toolNames.includes("click")) call = { name: "click", args: { index: id(/\[(f\d+:\d+)\]<button[^>]*>Submit/) } };
+        else call = { name: "done", args: { success: true, text: "submitted" } };
+        const a = JSON.stringify(call.args);
+        res.write(`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${stats.agentRequests}`, type: "function", function: { name: call.name, arguments: a } }] }, finish_reason: null }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", model, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
       if (Array.isArray(body.tools) && body.tools.length) {
         stats.toolRequests++;
         const name = body.tools[0].function?.name ?? "tool";

@@ -1,6 +1,7 @@
 import {
   ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, RotateCcw, ScanText, Settings2, Square, TextQuote, Trash2, X,
 } from "lucide-react";
+import { AgentRun } from "./AgentRun";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SafeMarkdown } from "./Markdown";
 import { ConversationStore, type Conversation } from "@/src/lib/db";
@@ -46,6 +47,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   const [tstate, setTstate] = useState<TranslateState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [agentTask, setAgentTask] = useState<{ tabId: number; task: string; key: number } | null>(null);
   const [flash, setFlash] = useState<"done" | "surprised" | null>(null); // brief mascot reactions
   const flashTimer = useRef(0);
   const react = useCallback((f: "done" | "surprised") => {
@@ -111,6 +113,13 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   async function send(text: string, kind?: "summary") {
     if (!text.trim() || busy) return;
     if (!configured) return onSetup();
+    const cmd = tr("agent.command");
+    if (!kind && (text.trim().startsWith(cmd) || text.trim().startsWith("/act"))) {
+      const task = text.trim().replace(cmd, "").replace(/^\/act/, "").trim();
+      if (!task || !tab?.id) return setPageError(tr("agent.usage"));
+      setInput("");
+      return setAgentTask({ tabId: tab.id, task, key: Date.now() });
+    }
     const user: Msg = { id: `u${Date.now()}`, role: "user", content: text.trim(), kind };
     const asst: Msg = { id: `a${Date.now()}`, role: "assistant", content: "", status: "streaming", kind };
     const history = [...messages.filter((m) => m.status !== "error"), user].map(({ role, content }) => ({ role, content }));
@@ -270,6 +279,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
       </div>
 
       <div className="space-y-2 px-3">
+        {agentTask && <AgentRun key={agentTask.key} tabId={agentTask.tabId} task={agentTask.task} onClose={() => setAgentTask(null)} />}
         {!configured && (
           <div data-testid="nokey-banner" className="flex animate-in items-center gap-2 rounded-card bg-primary-soft px-3 py-2 text-[12.5px] text-primary-soft-foreground">
             <KeyRound className="size-4 shrink-0" />

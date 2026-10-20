@@ -238,6 +238,12 @@ export class PageObserver {
   }
 
   /** Substantial DOM change since the last snapshot. */
+  /** The live element behind an id (for the on-page highlight). */
+  element(id: string): Element | undefined {
+    const e = this.byId.get(id)?.el;
+    return e?.isConnected ? e : undefined;
+  }
+
   domChanged(threshold = 40): boolean {
     this.mo?.takeRecords().forEach((r) => (this.mutations += r.addedNodes.length + r.removedNodes.length));
     return this.mutations >= threshold;

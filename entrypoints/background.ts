@@ -7,6 +7,8 @@ import { friendlyError, getKey, keyOptional, loadProviders, redactSecrets, resol
 import { langName, loadSettings } from "@/src/lib/settings";
 import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib/types";
 import { tr } from "@/src/i18n";
+import { AGENT_PORT } from "@/src/agent/protocol";
+import { attachAgentPort } from "@/src/agent/sw-host";
 
 declare const __E2E__: boolean;
 export const LLM_PORT = "sidekick-llm";
@@ -268,7 +270,17 @@ export default defineBackground({
     // ---- streaming chat over a long-lived port (keeps the SW alive while active) ----
     chrome.runtime.onConnect.addListener((port) => {
       noteEvent();
-      if (port.name !== LLM_PORT || port.sender?.id !== chrome.runtime.id) return;
+      if (port.sender?.id !== chrome.runtime.id) return;
+      if (port.name === AGENT_PORT) {
+        attachAgentPort(port, {
+          resolveModel: async () => resolveTask((await loadSettings()).models.chat),
+          ensureInjected: ensureContentScript,
+          // user never-act list arrives with site policies (PR 4); built-in list applies now
+          neverSites: async () => [],
+        });
+        return;
+      }
+      if (port.name !== LLM_PORT) return;
       const running = new Map<string, AbortController>();
       const send = (e: PortEvent) => {
         try {
