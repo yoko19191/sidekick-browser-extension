@@ -146,6 +146,12 @@ export class PageObserver {
       type: tag === "input" ? i.type : undefined,
       role: el.getAttribute("role") ?? undefined,
       inForm: !!form,
+      formSubmitText: form
+        ? Array.from(form.querySelectorAll('button[type=submit],button:not([type]),input[type=submit],input[type=image]'))
+            .map((b) => clean((b as HTMLInputElement).value || b.textContent || b.getAttribute("aria-label"), 40))
+            .filter(Boolean)
+            .join(" / ") || undefined
+        : undefined,
       isSubmit,
       sensitive: isSensitive(el),
       href: tag === "a" ? (el as HTMLAnchorElement).href : undefined,

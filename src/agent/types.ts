@@ -14,6 +14,8 @@ export interface ElementInfo {
   sensitive?: boolean; // password / card / otp field (spec §7.1)
   href?: string;
   occluded?: boolean;
+  /** Text of the submit button(s) of the enclosing form, so Enter can be classified like a click on them. */
+  formSubmitText?: string;
 }
 
 export interface PageSnapshot {
