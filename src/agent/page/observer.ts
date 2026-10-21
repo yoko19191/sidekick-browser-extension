@@ -27,14 +27,14 @@ export function visible(el: Element): boolean {
     const fs = parseFloat(st.fontSize);
     if (Number.isFinite(fs) && fs > 0 && fs < 1) return false;
   }
-  // Off-screen (and not interactive — interactive off-screen still listed as "outside viewport")
+  // Positioned off the document entirely (e.g. left:-9999px tricks). Content merely below the fold is NOT hidden:
+  // the walker keeps descending and nearViewport() decides whether it is listed or only counted.
   try {
     const r = he.getBoundingClientRect?.();
     if (r && win && r.width + r.height > 0) {
-      const margin = Math.max(win.innerHeight, 800);
-      if (r.bottom < -margin || r.top > win.innerHeight + margin || r.right < -margin || r.left > win.innerWidth + margin) {
-        if (!isInteractive(el)) return false;
-      }
+      const docW = Math.max(el.ownerDocument.documentElement?.scrollWidth ?? 0, win.innerWidth);
+      const absRight = r.right + win.scrollX, absBottom = r.bottom + win.scrollY, absLeft = r.left + win.scrollX;
+      if (absRight <= 0 || absBottom <= 0 || absLeft >= docW) return false;
     }
   } catch { /* jsdom */ }
   return true;
@@ -235,6 +235,7 @@ export class PageObserver {
         } else if (/^h[1-6]$/.test(tag) || el.getAttribute("role") === "dialog" || tag === "dialog") {
           push(`${pad}<${tag}>${clean((el as HTMLElement).innerText ?? el.textContent, 120)}`);
         } else if (el.children.length === 0) {
+          if (!nearViewport(el, 2)) continue; // far plain text: skip (tokens); interactive ones are still counted
           const t = clean(el.textContent, 120);
           if (t.length > 1) push(`${pad}${t}`);
         }
