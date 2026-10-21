@@ -51,7 +51,7 @@ test("web action: stop ends the run within 500 ms while a confirm is pending", a
 });
 
 test("observer: a 10k-node page lists the first screens and counts the rest", async () => {
-  const url = `${base}/fixtures/big-10k.html`;
+  const url = `${base}/synthetic/big-10k.html`; // synthesized via context.route, no file on disk
   const rows = Array.from({ length: 2500 }, (_, i) => `<div class="row"><p>Row ${i} text</p><button>Btn ${i}</button><a href="#r${i}">Link ${i}</a></div>`).join("");
   await context.route(url, (r) => r.fulfill({ contentType: "text/html", body: `<!doctype html><title>big</title><body>${rows}<button id="last">LAST_BUTTON</button></body>` }));
   const page = await context.newPage();
