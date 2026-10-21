@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { launch, onboard, openPanel } from "./harness";
+import { launch, onboard, openPanel, tabIdFor } from "./harness";
 import { startMock } from "../fixtures/mock-llm.mjs";
 
 let context: BrowserContext;
@@ -48,4 +48,27 @@ test("web action: stop ends the run within 500 ms while a confirm is pending", a
   await expect(panel.getByTestId("agent-stop")).toHaveCount(0, { timeout: 500 });
   expect(Date.now() - t0).toBeLessThan(500);
   await expect(page.locator("#ok")).toHaveText("");
+});
+
+test("observer: a 10k-node page lists the first screens and counts the rest", async () => {
+  const url = `${base}/synthetic/big-10k.html`; // synthesized via context.route, no file on disk
+  const rows = Array.from({ length: 2500 }, (_, i) => `<div class="row"><p>Row ${i} text</p><button>Btn ${i}</button><a href="#r${i}">Link ${i}</a></div>`).join("");
+  await context.route(url, (r) => r.fulfill({ contentType: "text/html", body: `<!doctype html><title>big</title><body>${rows}<button id="last">LAST_BUTTON</button></body>` }));
+  const page = await context.newPage();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(url);
+  const panel = await openPanel(context, extId, url);
+  const tabId = await tabIdFor(panel, url);
+  const snap = await panel.evaluate(async (id) => {
+    await chrome.scripting.executeScript({ target: { tabId: id }, files: ["/content-scripts/content.js"] });
+    const t0 = performance.now();
+    const r = await chrome.tabs.sendMessage(id, { type: "agent:snapshot" });
+    return { ms: performance.now() - t0, tree: r.data.tree as string };
+  }, tabId);
+  expect(snap.tree).toContain("Btn 0");
+  expect(snap.tree).not.toContain("LAST_BUTTON");
+  const m = snap.tree.match(/\[\+(\d+) interactive elements outside the viewport/);
+  expect(m, "snapshot must end with a +N outside-viewport count").not.toBeNull();
+  expect(Number(m![1])).toBeGreaterThan(4000);
+  expect(snap.ms).toBeLessThan(1500);
 });

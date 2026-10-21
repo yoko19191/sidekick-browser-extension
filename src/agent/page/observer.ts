@@ -14,15 +14,40 @@ export interface ObserverOptions {
   maxTree?: number;
 }
 
-function visible(el: Element): boolean {
+/** True when a user could see the element. Hides display:none, opacity 0, near-zero font, and off-screen text (spec: do not feed invisible page text to the model). */
+export function visible(el: Element): boolean {
   const he = el as HTMLElement;
   if (he.hidden) return false;
   const anyEl = el as any;
-  if (typeof anyEl.checkVisibility === "function") return anyEl.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  if (typeof anyEl.checkVisibility === "function" && !anyEl.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
   const win = el.ownerDocument.defaultView;
-  const st = win?.getComputedStyle(el);
-  if (st && (st.display === "none" || st.visibility === "hidden")) return false;
+  const st = win?.getComputedStyle?.(el);
+  if (st) {
+    if (st.display === "none" || st.visibility === "hidden" || st.opacity === "0") return false;
+    const fs = parseFloat(st.fontSize);
+    if (Number.isFinite(fs) && fs > 0 && fs < 1) return false;
+  }
+  // Positioned off the document entirely (e.g. left:-9999px tricks). Content merely below the fold is NOT hidden:
+  // the walker keeps descending and nearViewport() decides whether it is listed or only counted.
+  try {
+    const r = he.getBoundingClientRect?.();
+    if (r && win && r.width + r.height > 0) {
+      const docW = Math.max(el.ownerDocument.documentElement?.scrollWidth ?? 0, win.innerWidth);
+      const absRight = r.right + win.scrollX, absBottom = r.bottom + win.scrollY, absLeft = r.left + win.scrollX;
+      if (absRight <= 0 || absBottom <= 0 || absLeft >= docW) return false;
+    }
+  } catch { /* jsdom */ }
   return true;
+}
+
+/** Element centre is inside (or within one screen of) the viewport. */
+export function nearViewport(el: Element, screens = 1): boolean {
+  const he = el as HTMLElement;
+  const win = el.ownerDocument.defaultView;
+  const r = he.getBoundingClientRect?.();
+  if (!r || !win || r.width + r.height === 0) return true; // unknown → keep
+  const m = Math.max(win.innerHeight, 1) * screens;
+  return r.bottom >= -m && r.top <= win.innerHeight + m && r.right >= -m && r.left <= win.innerWidth + m;
 }
 
 function isInteractive(el: Element): boolean {
@@ -57,7 +82,9 @@ export function isOccluded(el: Element): boolean {
   const win = doc.defaultView;
   if (!win || x < 0 || y < 0 || x > win.innerWidth || y > win.innerHeight) return false;
   const root = el.getRootNode() as Document | ShadowRoot;
-  const hit = (root.elementFromPoint ?? doc.elementFromPoint).call(root, x, y);
+  const efp = (root as Document).elementFromPoint ?? doc.elementFromPoint;
+  if (typeof efp !== "function") return false;
+  const hit = efp.call(root, x, y);
   return !!hit && hit !== el && !el.contains(hit) && !hit.contains(el);
 }
 
@@ -164,6 +191,7 @@ export class PageObserver {
     const lines: string[] = [];
     const max = this.opts.maxTree ?? MAX_TREE;
     let size = 0;
+    let outside = 0;
     const push = (s: string) => {
       if (size > max) return;
       size += s.length + 1;
@@ -179,6 +207,12 @@ export class PageObserver {
         if (!visible(el)) continue;
         const pad = "  ".repeat(Math.min(depth, 6));
         if (isInteractive(el)) {
+          // Prefer elements near the viewport; far ones are counted, not fully listed (saves tokens on huge pages).
+          if (!nearViewport(el, 1)) {
+            outside++;
+            this.idFor(el, frame); // still register so describe/execute work if the model knows the id from a prior step
+            continue;
+          }
           const id = this.idFor(el, frame);
           seen.add(id);
           const info = this.describeEl(el, id);
@@ -201,6 +235,7 @@ export class PageObserver {
         } else if (/^h[1-6]$/.test(tag) || el.getAttribute("role") === "dialog" || tag === "dialog") {
           push(`${pad}<${tag}>${clean((el as HTMLElement).innerText ?? el.textContent, 120)}`);
         } else if (el.children.length === 0) {
+          if (!nearViewport(el, 2)) continue; // far plain text: skip (tokens); interactive ones are still counted
           const t = clean(el.textContent, 120);
           if (t.length > 1) push(`${pad}${t}`);
         }
@@ -223,6 +258,7 @@ export class PageObserver {
 
     this.frameIndex(this.doc);
     if (this.doc.body) walk(this.doc.body, 0, 0);
+    if (outside > 0) push(`[+${outside} interactive elements outside the viewport; scroll to see them]`);
     const newIds = [...seen].filter((id) => !this.lastIds.has(id));
     this.lastIds = seen;
     this.mutations = 0;
@@ -230,6 +266,14 @@ export class PageObserver {
   }
 
   private sameOrigin(f: HTMLIFrameElement): boolean {
+    const src = f.getAttribute("src");
+    if (src && /^https?:/i.test(src)) {
+      try {
+        if (new URL(src, this.doc.baseURI).origin !== new URL(this.doc.baseURI).origin) return false;
+      } catch {
+        /* fall through to contentDocument check */
+      }
+    }
     try {
       return !!f.contentDocument;
     } catch {
