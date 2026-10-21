@@ -12,6 +12,7 @@ const ALLOWED: Record<string, RegExp> = {
   "src/lib/extract.ts": /内容过长，已截断/,
   "src/lib/settings.ts": /label: "(简体中文|繁體中文|日本語)"/,
   "src/agent/risk.ts": /const (CONSEQUENTIAL|DESTRUCTIVE|PAYMENT)|^\s*\/提交/, // matches page button text, not UI copy
+  "src/agent/page/observer.ts": /const SENSITIVE_NAME/, // matches page field names, not UI copy
   "src/lib/providers.ts": /billing\|余额/, // matches Chinese provider error text, not UI copy
 };
 

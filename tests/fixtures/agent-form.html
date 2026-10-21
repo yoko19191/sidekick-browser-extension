@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Agent form</title></head><body>
+<h1>Sign up</h1>
+<form id="f" onsubmit="event.preventDefault(); document.getElementById('ok').textContent = 'Thanks ' + this.name.value;">
+<label>Name <input type="text" name="name"></label>
+<button type="submit">Submit</button>
+</form>
+<p id="ok"></p>
+</body></html>

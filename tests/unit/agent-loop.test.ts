@@ -63,6 +63,26 @@ describe("WebAgent on pi-agent-core", () => {
     expect(page.executed).toEqual(["navigate"]);
   });
 
+  it("beforeToolCall holds R2 until confirm resolves, then allow-once runs", async () => {
+    let resolveConfirm!: (d: "allow-once" | "allow-kind" | "deny") => void;
+    const confirm = vi.fn(
+      () => new Promise<"allow-once" | "allow-kind" | "deny">((r) => {
+        resolveConfirm = r;
+      }),
+    );
+    const { agent, page } = setup([
+      turn(call("click", { index: "f0:9" })),
+      turn(call("done", { text: "bought", success: true })),
+    ], { "f0:9": { index: "f0:9", tag: "button", text: "立即购买" } }, { confirm });
+    const run = agent.run("buy");
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+    expect(page.executed).toEqual([]);
+    resolveConfirm("allow-once");
+    const r = await run;
+    expect(r.status).toBe("done");
+    expect(page.executed).toEqual(["click"]);
+  });
+
   it("R2 waits for confirm and deny blocks execution", async () => {
     const confirm = vi.fn(async () => "deny" as const);
     const { agent, page } = setup([

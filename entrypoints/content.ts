@@ -5,6 +5,7 @@ import { PageUi } from "@/src/lib/page-ui";
 import { collectParagraphs, insertTranslation, markPending, restoreOriginal, TRANSLATION_CSS } from "@/src/lib/paragraphs";
 import type { Settings, TranslateState } from "@/src/lib/types";
 import { tr } from "@/src/i18n";
+import { handleAgentMessage } from "@/src/agent/page/content-host";
 
 /**
  * Injected on demand (chrome.scripting.executeScript) — never declared in the manifest.
@@ -230,6 +231,10 @@ export default defineContentScript({
     }
 
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+      if (typeof msg?.type === "string" && msg.type.startsWith("agent:")) {
+        handleAgentMessage(msg).then(sendResponse, (e) => sendResponse({ ok: false, error: String(e?.message ?? e) }));
+        return true;
+      }
       switch (msg?.type) {
         case "pp:ping":
           sendResponse({ ok: true });
