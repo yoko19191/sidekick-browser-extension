@@ -10,6 +10,8 @@ export interface ElementInfo {
   type?: string; // input type
   role?: string;
   inForm?: boolean;
+  /** The element's form contains a password, payment or one-time-code field. */
+  formSensitive?: boolean;
   isSubmit?: boolean; // button[type=submit] / input[type=submit] inside a form
   sensitive?: boolean; // password / card / otp field (spec §7.1)
   href?: string;
@@ -51,9 +53,11 @@ export interface ConfirmRequest {
   action: ActionRequest;
   target?: ElementInfo;
   reason: string;
+  /** Present when the action has a scoped kind that "allow this kind / always on this site" can cover. */
+  kind?: string;
 }
 
-export type ConfirmDecision = "allow-once" | "allow-kind" | "deny";
+export type ConfirmDecision = "allow-once" | "allow-kind" | "allow-site" | "deny";
 
 /** UI callbacks. All may be async; the loop honours its abort signal while waiting. */
 export interface AgentHooks {

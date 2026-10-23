@@ -20,10 +20,16 @@ When finished, call done alone.`;
 export interface WebAgentOptions {
   model: Model<any>;
   streamFn: StreamFn;
+  /** Hard cap per model request (ms). Default 300 s. */
+  requestTimeoutMs?: number;
+  /** Abort a model request after this long with no streamed content (ms). Default 30 s. */
+  idleTimeoutMs?: number;
   driver: PageDriver;
   hooks: AgentHooks;
   maxSteps?: number;
   never?: string[];
+  /** Permanent / pre-seeded allow-kinds (e.g. from the site no-confirm list). */
+  allowedKinds?: string[];
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
 }
 
@@ -43,6 +49,9 @@ function isStateMessage(m: AgentMessage): boolean {
   return typeof first === "string" && first.startsWith(STATE_MARKER);
 }
 
+/** Error code when a model request stalls (idle) or exceeds the hard cap. */
+export const TIMEOUT = "model-timeout";
+
 export class WebAgent {
   readonly agent: Agent;
   private steps = 0;
@@ -58,9 +67,27 @@ export class WebAgent {
 
   constructor(private readonly opts: WebAgentOptions) {
     const { driver, hooks } = opts;
+    for (const k of opts.allowedKinds ?? []) this.allowedKinds.add(k);
     this.agent = new Agent({
       initialState: { systemPrompt: SYSTEM_PROMPT, model: opts.model, tools: buildTools(driver, hooks) },
-      streamFn: opts.streamFn,
+      streamFn: ((model: unknown, ctx: unknown, o?: { signal?: AbortSignal }) => {
+        // Idle timeout: abort only when nothing has streamed for idleTimeoutMs; a total cap is the backstop.
+        const idle = new AbortController();
+        const arm = () => {
+          clearTimeout(this.idleTimer);
+          this.idleTimer = setTimeout(() => {
+            this.timedOut = true;
+            idle.abort(new Error("model request timed out"));
+            this.releaseStop();
+          }, opts.idleTimeoutMs ?? 30_000);
+        };
+        this.touch = arm;
+        arm();
+        const total = AbortSignal.timeout(opts.requestTimeoutMs ?? 300_000);
+        total.addEventListener("abort", () => { this.timedOut = true; this.releaseStop(); }, { once: true });
+        const signal = AbortSignal.any([idle.signal, total, ...(o?.signal ? [o.signal] : [])]);
+        return (opts.streamFn as any)(model, ctx, { ...o, signal });
+      }) as StreamFn,
       getApiKey: opts.getApiKey,
       toolExecution: "sequential",
 
@@ -110,9 +137,9 @@ ${escapePageText(snap.tree)}
         const level = effectiveLevel(verdict, this.allowedKinds);
         if (level === 3) return block(`blocked: ${verdict.reason}. Use ask_user to have the user do this themselves.`);
         if (level === 2) {
-          const d = await hooks.confirm({ action: { name, args: a }, target, reason: verdict.reason }, signal);
+          const d = await hooks.confirm({ action: { name, args: a }, target, reason: verdict.reason, kind: verdict.kind }, signal);
           if (d === "deny") return block("the user declined this action");
-          if (d === "allow-kind" && verdict.kind) this.allowedKinds.add(verdict.kind);
+          if ((d === "allow-kind" || d === "allow-site") && verdict.kind) this.allowedKinds.add(verdict.kind);
         }
         return undefined;
       },
@@ -145,6 +172,11 @@ ${escapePageText(snap.tree)}
         return undefined;
       },
     });
+    // Any streamed event resets the idle timer; a finished message clears it.
+    this.agent.subscribe((ev: any) => {
+      if (ev?.type === "message_update" || ev?.type === "message_start") this.touch();
+      if (ev?.type === "message_end" || ev?.type === "agent_end") clearTimeout(this.idleTimer);
+    });
   }
 
   get maxSteps() {
@@ -163,11 +195,16 @@ ${escapePageText(snap.tree)}
   async run(task: string): Promise<RunOutcome> {
     this.startSite = siteOf(await this.opts.driver.currentUrl());
     try {
-      await this.agent.prompt(task);
+      // Stop must win even if a provider ignores the abort signal mid-request.
+      await Promise.race([this.agent.prompt(task), this.stopGate]);
     } catch (e) {
+      clearTimeout(this.idleTimer);
+      if (this.timedOut && !this.stopped) return { status: "error", steps: this.steps, error: TIMEOUT };
       if (this.stopped) return { status: "stopped", steps: this.steps };
       return { status: "error", steps: this.steps, error: String((e as Error)?.message ?? e) };
     }
+    clearTimeout(this.idleTimer);
+    if (this.timedOut && !this.stopped && !this.doneResult) { this.agent.abort(); return { status: "error", steps: this.steps, error: TIMEOUT }; }
     if (this.doneResult) return { status: "done", ...this.doneResult, steps: this.steps };
     if (this.stopped) return { status: "stopped", steps: this.steps };
     const err = this.agent.state.errorMessage;
@@ -176,8 +213,15 @@ ${escapePageText(snap.tree)}
   }
 
   /** Stop button: aborts the in-flight request / tool and ends the run. */
+  private releaseStop!: () => void;
+  private timedOut = false;
+  private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private touch: () => void = () => {};
+  private stopGate = new Promise<void>((r) => (this.releaseStop = r));
+
   stop() {
     this.stopped = true;
+    this.releaseStop();
     this.agent.abort();
   }
 }

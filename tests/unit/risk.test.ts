@@ -40,3 +40,25 @@ describe("risk classify", () => {
     expect(effectiveLevel(plain, allowed)).toBe(1);
   });
 });
+
+describe("forms with password or payment fields always confirm (no allow-kind)", () => {
+  const t = { index: "1", tag: "input", text: "Name", inForm: true, formSubmitText: "Continue", formSensitive: true };
+  it("Enter in a payment form whose button says Continue", () => {
+    const v = classify({ name: "send_keys", args: { index: "1", keys: "Enter" } }, t, ctx);
+    expect(v.level).toBe(2);
+    expect(v.kind).toBeUndefined();
+  });
+  it("Enter in a payment form with a search-like input named q", () => {
+    const v = classify({ name: "send_keys", args: { index: "1", keys: "Enter" } }, { ...t, type: "search", text: "q" }, ctx);
+    expect(v.level).toBe(2);
+    expect(v.kind).toBeUndefined();
+  });
+  it("clicking Continue in a payment form", () => {
+    const v = classify({ name: "click", args: { index: "2" } }, { index: "2", tag: "button", text: "Continue", isSubmit: true, inForm: true, formSensitive: true }, ctx);
+    expect(v.level).toBe(2);
+    expect(v.kind).toBeUndefined();
+  });
+  it("a plain form still gets an allow-kind", () => {
+    expect(classify({ name: "click", args: { index: "2" } }, { index: "2", tag: "button", text: "Go", isSubmit: true, inForm: true }, ctx).kind).toMatch(/^submit:/);
+  });
+});

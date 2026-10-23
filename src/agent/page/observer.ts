@@ -12,6 +12,8 @@ const MAX_TREE = 40_000;
 
 export interface ObserverOptions {
   maxTree?: number;
+  /** Delay between typed characters (ms). 0 types instantly. */
+  typeDelayMs?: number;
 }
 
 /** True when a user could see the element. Hides display:none, opacity 0, near-zero font, and off-screen text (spec: do not feed invisible page text to the model). */
@@ -34,7 +36,7 @@ export function visible(el: Element): boolean {
     if (r && win && r.width + r.height > 0) {
       const docW = Math.max(el.ownerDocument.documentElement?.scrollWidth ?? 0, win.innerWidth);
       const absRight = r.right + win.scrollX, absBottom = r.bottom + win.scrollY, absLeft = r.left + win.scrollX;
-      if (absRight <= 0 || absBottom <= 0 || absLeft >= docW) return false;
+      if (absRight < 0 || absBottom < 0 || absLeft >= docW) return false; // sr-only (1px, margin:-1px) ends exactly at 0 and stays visible
     }
   } catch { /* jsdom */ }
   return true;
@@ -74,6 +76,31 @@ export function isSensitive(el: Element): boolean {
 }
 
 /** Covered by another element at its centre (cookie bars, overlays). Needs layout; false when unknown. */
+/** Parent in the composed (flattened) tree: slot assignment first, then DOM parent, then shadow host. */
+function composedParent(n: Node): Node | null {
+  const slot = (n as Element).assignedSlot;
+  if (slot) return slot;
+  if (n.parentNode) return n.parentNode instanceof ShadowRoot ? n.parentNode.host : n.parentNode;
+  return null;
+}
+
+/** True when `inner` is `outer` or sits inside it in the composed tree (crosses shadow roots and slots). */
+export function composedContains(outer: Node, inner: Node): boolean {
+  for (let n: Node | null = inner; n; n = composedParent(n)) if (n === outer) return true;
+  return false;
+}
+
+/** Deepest element at a point, descending through open shadow roots. */
+function deepHit(doc: Document, x: number, y: number): Element | null {
+  let hit = doc.elementFromPoint?.(x, y) ?? null;
+  for (let i = 0; hit?.shadowRoot && i < 32; i++) {
+    const inner = hit.shadowRoot.elementFromPoint?.(x, y);
+    if (!inner || inner === hit) break;
+    hit = inner;
+  }
+  return hit;
+}
+
 export function isOccluded(el: Element): boolean {
   const r = (el as HTMLElement).getBoundingClientRect?.();
   if (!r || r.width === 0 || r.height === 0) return false;
@@ -81,16 +108,49 @@ export function isOccluded(el: Element): boolean {
   const doc = el.ownerDocument;
   const win = doc.defaultView;
   if (!win || x < 0 || y < 0 || x > win.innerWidth || y > win.innerHeight) return false;
-  const root = el.getRootNode() as Document | ShadowRoot;
-  const efp = (root as Document).elementFromPoint ?? doc.elementFromPoint;
-  if (typeof efp !== "function") return false;
-  const hit = efp.call(root, x, y);
-  return !!hit && hit !== el && !el.contains(hit) && !hit.contains(el);
+  if (typeof doc.elementFromPoint !== "function") return false;
+  const hit = deepHit(doc, x, y);
+  return !!hit && !composedContains(el, hit) && !composedContains(hit, el);
 }
 
 function clean(s: string | null | undefined, max = MAX_TEXT): string {
   const t = (s ?? "").replace(/\s+/g, " ").trim();
   return t.length > max ? t.slice(0, max) + "…" : t;
+}
+
+/** Tiny font or positioned off the document: hidden even under ARIA naming rules (which do count display:none refs). */
+function tinyOrOffDoc(el: Element): boolean {
+  const win = el.ownerDocument.defaultView;
+  const fs = parseFloat(win?.getComputedStyle?.(el).fontSize ?? "");
+  if (Number.isFinite(fs) && fs > 0 && fs < 1) return true;
+  try {
+    const r = (el as HTMLElement).getBoundingClientRect?.();
+    if (r && win && r.width + r.height > 0 && (r.right + win.scrollX < 0 || r.bottom + win.scrollY < 0)) return true;
+  } catch { /* jsdom */ }
+  return false;
+}
+
+/**
+ * Text of `root` built only from text nodes whose element chain (up to and including root) passes `isShown`.
+ * innerText/textContent would leak opacity:0, tiny-font or display:none text into names (prompt-injection vector).
+ */
+function shownText(root: Element, isShown: (el: Element) => boolean = visible): string {
+  const ok = new Map<Element, boolean>();
+  const shown = (el: Element): boolean => {
+    const c = ok.get(el);
+    if (c !== undefined) return c;
+    const v = isShown(el) && (el === root || !el.parentElement || shown(el.parentElement));
+    ok.set(el, v);
+    return v;
+  };
+  const out: string[] = [];
+  const doc = root.ownerDocument;
+  const tw = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
+  for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+    const p = n.parentElement;
+    if (p && shown(p)) out.push(n.nodeValue ?? "");
+  }
+  return out.join(" ");
 }
 
 function labelOf(el: Element): string {
@@ -99,18 +159,18 @@ function labelOf(el: Element): string {
   if (aria) return clean(aria);
   const lb = el.getAttribute("aria-labelledby");
   if (lb) {
-    const t = lb.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)?.textContent ?? "").join(" ");
+    const t = lb.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)).map((r) => (r ? shownText(r, (e) => !tinyOrOffDoc(e)) : "")).join(" ");
     if (t.trim()) return clean(t);
   }
   const tag = el.tagName.toLowerCase();
   if (tag === "input" || tag === "textarea" || tag === "select") {
     const i = el as HTMLInputElement;
-    const lab = i.labels?.[0]?.textContent;
+    const lab = i.labels?.[0] ? shownText(i.labels[0]) : "";
     if (lab) return clean(lab);
     if (i.type === "submit" || i.type === "button") return clean(i.value);
     return clean(i.placeholder || i.name || el.getAttribute("title"));
   }
-  return clean(he.innerText ?? el.textContent) || clean(el.getAttribute("title")) || clean((el.querySelector("img") as HTMLImageElement | null)?.alt);
+  return clean(shownText(he)) || clean(el.getAttribute("title")) || clean((el.querySelector("img") as HTMLImageElement | null)?.alt);
 }
 
 interface Entry {
@@ -180,6 +240,7 @@ export class PageObserver {
             .join(" / ") || undefined
         : undefined,
       isSubmit,
+      formSensitive: !!form && Array.from(form.querySelectorAll("input,textarea,select")).some((f) => isSensitive(f)),
       sensitive: isSensitive(el),
       href: tag === "a" ? (el as HTMLAnchorElement).href : undefined,
       occluded: isOccluded(el),
@@ -192,6 +253,9 @@ export class PageObserver {
     const max = this.opts.maxTree ?? MAX_TREE;
     let size = 0;
     let outside = 0;
+    // Off-viewport interactive elements, grouped by the nearest preceding heading (with a few sample labels).
+    let heading = "";
+    const groups = new Map<string, { where: "above" | "below"; heading: string; count: number; labels: string[] }>();
     const push = (s: string) => {
       if (size > max) return;
       size += s.length + 1;
@@ -206,10 +270,39 @@ export class PageObserver {
         if (["script", "style", "noscript", "template", "svg", "head"].includes(tag)) continue;
         if (!visible(el)) continue;
         const pad = "  ".repeat(Math.min(depth, 6));
+        if (tag === "iframe") {
+          try {
+            const d = (el as HTMLIFrameElement).contentDocument;
+            if (d?.body) walk(d.body, this.frameIndex(d), depth + 1);
+          } catch {
+            /* cross-origin */
+          }
+          // Report every cross-origin frame, in or out of the viewport, before any leaf/viewport filtering.
+          if (!this.sameOrigin(el as HTMLIFrameElement) && !nearViewport(el, 1)) {
+            // Far cross-origin frames go into the per-heading counts (and the shared label budget), not the tree.
+            outside++;
+            const top = (el as HTMLElement).getBoundingClientRect?.().top ?? 0;
+            const where = top < 0 ? "above" : "below";
+            const key = `${where}|${heading}`;
+            const g = groups.get(key) ?? { where, heading, count: 0, labels: [] };
+            g.count++;
+            if (g.labels.length < 3 && !g.labels.includes("cross-origin iframe")) g.labels.push("cross-origin iframe");
+            groups.set(key, g);
+          } else if (!this.sameOrigin(el as HTMLIFrameElement)) push(`${pad}[unreachable: cross-origin iframe ${clean((el as HTMLIFrameElement).src, 60)}; content exists but cannot be read or operated]`);
+          continue;
+        }
         if (isInteractive(el)) {
           // Prefer elements near the viewport; far ones are counted, not fully listed (saves tokens on huge pages).
           if (!nearViewport(el, 1)) {
             outside++;
+            const top = (el as HTMLElement).getBoundingClientRect?.().top ?? 0;
+            const where = top < 0 ? "above" : "below";
+            const key = `${where}|${heading}`;
+            const g = groups.get(key) ?? { where, heading, count: 0, labels: [] };
+            g.count++;
+            const label = clean(labelOf(el), 16);
+            if (label.length > 1 && g.labels.length < 3 && !g.labels.includes(label)) g.labels.push(label);
+            groups.set(key, g);
             this.idFor(el, frame); // still register so describe/execute work if the model knows the id from a prior step
             continue;
           }
@@ -233,21 +326,13 @@ export class PageObserver {
           const isNew = !this.lastIds.has(id) && this.lastIds.size > 0 ? "*" : "";
           push(`${pad}${isNew}[${id}]<${tag}${attrs.length ? " " + attrs.join(" ") : ""}>${info.text}</${tag}>`);
         } else if (/^h[1-6]$/.test(tag) || el.getAttribute("role") === "dialog" || tag === "dialog") {
-          push(`${pad}<${tag}>${clean((el as HTMLElement).innerText ?? el.textContent, 120)}`);
+          const ht = clean((el as HTMLElement).innerText ?? el.textContent, 120);
+          if (/^h[1-6]$/.test(tag)) heading = clean(ht, 30);
+          push(`${pad}<${tag}>${ht}`);
         } else if (el.children.length === 0) {
           if (!nearViewport(el, 2)) continue; // far plain text: skip (tokens); interactive ones are still counted
           const t = clean(el.textContent, 120);
           if (t.length > 1) push(`${pad}${t}`);
-        }
-        if (tag === "iframe") {
-          try {
-            const d = (el as HTMLIFrameElement).contentDocument;
-            if (d?.body) walk(d.body, this.frameIndex(d), depth + 1);
-          } catch {
-            /* cross-origin */
-          }
-          if (!this.sameOrigin(el as HTMLIFrameElement)) push(`${pad}[unreachable: cross-origin iframe ${clean((el as HTMLIFrameElement).src, 60)}; content exists but cannot be read or operated]`);
-          continue;
         }
         if (tag.includes("-") && !(el as HTMLElement).shadowRoot && el.childNodes.length === 0 && this.doc.defaultView?.customElements?.get(tag))
           push(`${pad}[unreachable: <${tag}> has a closed shadow root; content exists but cannot be read or operated]`);
@@ -258,7 +343,16 @@ export class PageObserver {
 
     this.frameIndex(this.doc);
     if (this.doc.body) walk(this.doc.body, 0, 0);
-    if (outside > 0) push(`[+${outside} interactive elements outside the viewport; scroll to see them]`);
+    if (outside > 0) {
+      push(`[+${outside} interactive elements outside the viewport; scroll to see them]`);
+      let budget = 20; // sample labels across all groups
+      for (const g of [...groups.values()].sort((a, b) => b.count - a.count).slice(0, 8)) {
+        const labels = g.labels.slice(0, Math.max(0, Math.min(3, budget)));
+        budget -= labels.length;
+        const sec = g.heading ? ` section "${g.heading}"` : "";
+        push(`  [${g.where}${sec}: ~${g.count}${labels.length ? `: ${labels.join(", ")}${g.count > labels.length ? "…" : ""}` : ""}]`);
+      }
+    }
     const newIds = [...seen].filter((id) => !this.lastIds.has(id));
     this.lastIds = seen;
     this.mutations = 0;
@@ -299,7 +393,14 @@ export class PageObserver {
     return this.mutations >= threshold;
   }
 
+  private aborted = false;
+  /** Stop in-flight work (per-character typing) as soon as possible. */
+  abort() {
+    this.aborted = true;
+  }
+
   async execute(a: ActionRequest): Promise<ActionResult> {
+    this.aborted = false;
     const args = a.args as Record<string, any>;
     const target = typeof args.index === "string" ? this.byId.get(args.index)?.el : undefined;
     if (typeof args.index === "string" && (!target || !target.isConnected)) return { ok: false, message: `element ${args.index} not found` };
@@ -317,16 +418,23 @@ export class PageObserver {
         case "input": {
           if (isSensitive(el!)) return { ok: false, message: "refused: sensitive field" };
           el!.focus?.();
-          if (el!.isContentEditable) {
-            if (args.clear !== false) el!.textContent = "";
-            el!.textContent = (el!.textContent ?? "") + String(args.text);
-          } else {
-            const proto = el instanceof win.HTMLTextAreaElement ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
-            const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-            const next = args.clear === false ? (el as HTMLInputElement).value + String(args.text) : String(args.text);
-            setter ? setter.call(el, next) : ((el as HTMLInputElement).value = next);
+          const text = String(args.text);
+          const proto = el instanceof win.HTMLTextAreaElement ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+          const setVal = (v: string) => (el!.isContentEditable ? (el!.textContent = v) : setter ? setter.call(el, v) : ((el as HTMLInputElement).value = v));
+          const getVal = () => (el!.isContentEditable ? (el!.textContent ?? "") : (el as HTMLInputElement).value);
+          if (args.clear !== false) setVal("");
+          // Type per character so key-driven pages behave, and so stop interrupts mid-way.
+          const delay = this.opts.typeDelayMs ?? 12;
+          for (const ch of text) {
+            if (this.aborted) {
+              el!.dispatchEvent(new win.Event("change", { bubbles: true }));
+              return { ok: false, message: "aborted by user" };
+            }
+            setVal(getVal() + ch);
+            el!.dispatchEvent(new win.Event("input", { bubbles: true }));
+            if (delay > 0) await new Promise((r) => setTimeout(r, delay));
           }
-          el!.dispatchEvent(new win.Event("input", { bubbles: true }));
           el!.dispatchEvent(new win.Event("change", { bubbles: true }));
           return { ok: true, message: `typed into ${args.index}` };
         }

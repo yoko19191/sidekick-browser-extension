@@ -25,9 +25,14 @@ export function siteOf(url: string): string {
   }
 }
 
+/** Browser-internal pages and the Web Store, where extensions can't (and must not) script. */
+export function isRestrictedUrl(url: string): boolean {
+  if (!/^(https?|file):/i.test(url)) return true;
+  return /^https:\/\/chromewebstore\.google\.com\//i.test(url) || /^https:\/\/chrome\.google\.com\/webstore/i.test(url);
+}
+
 function isForbiddenUrl(url: string, never: string[]): boolean {
-  if (/^(chrome|chrome-extension|edge|about|devtools|view-source):/i.test(url)) return true;
-  if (/^https:\/\/chromewebstore\.google\.com\//i.test(url) || /^https:\/\/chrome\.google\.com\/webstore/i.test(url)) return true;
+  if (isRestrictedUrl(url)) return true;
   const site = siteOf(url);
   return !!site && never.some((d) => site === d || site.endsWith("." + d));
 }
@@ -85,6 +90,7 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
         if (DESTRUCTIVE.test(f)) return { level: 2, reason: `Enter submits a form whose button "${f.slice(0, 30)}" deletes something; confirm every time` };
         if (PAYMENT.test(f)) return { level: 2, reason: `Enter submits a form whose button "${f.slice(0, 30)}" involves payment; confirm every time` };
       }
+      if (keys === "Enter" && target?.inForm && target.formSensitive) return { level: 2, reason: "Enter submits a form with password or payment fields; confirm every time" };
       if (keys === "Enter" && target?.inForm) return { level: 2, reason: "Enter inside a form submits it", kind: `submit:${siteOf(ctx.currentUrl)}` };
       return { level: 1, reason: "key press" };
     }
@@ -93,6 +99,7 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
       const btn = `${target?.text ?? ""} ${target?.role ?? ""}`;
       if (DESTRUCTIVE.test(btn)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" deletes something; confirm every time` };
       if (PAYMENT.test(btn)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" involves payment; confirm every time` };
+      if (target?.isSubmit && target.formSensitive) return { level: 2, reason: "submits a form with password or payment fields; confirm every time" };
       if (target?.isSubmit) return { level: 2, reason: "submits a form", kind: `submit:${siteOf(ctx.currentUrl)}` };
       const label = `${target?.text ?? ""} ${target?.role ?? ""}`;
       if (CONSEQUENTIAL.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" may have consequences`, kind: `consequential:${siteOf(ctx.currentUrl)}:${(target?.text ?? "").trim().toLowerCase().slice(0, 30)}` };

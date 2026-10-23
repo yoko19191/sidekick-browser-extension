@@ -50,6 +50,26 @@ test("web action: stop ends the run within 500 ms while a confirm is pending", a
   await expect(page.locator("#ok")).toHaveText("");
 });
 
+test("web action: stop during per-character typing adds no further characters", async () => {
+  const page = await context.newPage();
+  const url = `${base}/fixtures/agent-form.html?t=longtype`;
+  await page.goto(url);
+  const panel = await openPanel(context, extId, url);
+  await panel.getByTestId("composer").fill("/act LONGTYPE fill the name");
+  await panel.getByTestId("send").click();
+  const name = page.locator('input[name="name"]');
+  await expect.poll(async () => (await name.inputValue()).length, { timeout: 15_000 }).toBeGreaterThan(10);
+  const t0 = Date.now();
+  await panel.getByTestId("agent-stop").click();
+  await expect(panel.getByTestId("agent-stop")).toHaveCount(0, { timeout: 500 });
+  expect(Date.now() - t0).toBeLessThan(500);
+  const atStop = (await name.inputValue()).length;
+  await page.waitForTimeout(800);
+  const later = (await name.inputValue()).length;
+  expect(later - atStop, "typing must halt right after stop").toBeLessThanOrEqual(2);
+  expect(later).toBeLessThan(400);
+});
+
 test("observer: a 10k-node page lists the first screens and counts the rest", async () => {
   const url = `${base}/synthetic/big-10k.html`; // synthesized via context.route, no file on disk
   const rows = Array.from({ length: 2500 }, (_, i) => `<div class="row"><p>Row ${i} text</p><button>Btn ${i}</button><a href="#r${i}">Link ${i}</a></div>`).join("");

@@ -58,6 +58,9 @@ export function AgentRun({ tabId, task, onClose }: { tabId: number; task: string
     : outcome.status === "done" ? (outcome.success ? tr("agent.done") : tr("agent.failed"))
     : outcome.status === "stopped" ? tr("agent.stopped")
     : outcome.status === "budget" ? tr("agent.budget")
+    : outcome.error === "restricted-page" ? tr("agent.restricted")
+    : outcome.error === "never-site" ? tr("agent.neverSite")
+    : outcome.error === "model-timeout" ? tr("agent.timeout")
     : tr("agent.error", { msg: outcome.error ?? "" });
 
   return (
@@ -99,7 +102,9 @@ export function AgentRun({ tabId, task, onClose }: { tabId: number; task: string
           {pending.req.target && <div className="mt-1 truncate font-mono text-[12px]">{pending.req.action.name} · {pending.req.target.text || pending.req.target.tag}</div>}
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Button size="sm" onClick={() => decide("allow-once")} testId="agent-allow-once">{tr("agent.allowOnce")}</Button>
-            <Button size="sm" variant="outline" onClick={() => decide("allow-kind")} testId="agent-allow-kind">{tr("agent.allowKind")}</Button>
+            {/* deletion / payment carry no kind: only "allow once" or "deny" */}
+            {pending.req.kind && <Button size="sm" variant="outline" onClick={() => decide("allow-kind")} testId="agent-allow-kind">{tr("agent.allowKind")}</Button>}
+            {pending.req.kind && <Button size="sm" variant="outline" onClick={() => decide("allow-site")} testId="agent-allow-site">{tr("agent.allowSite")}</Button>}
             <Button size="sm" variant="outline" onClick={() => decide("deny")} testId="agent-deny">{tr("agent.deny")}</Button>
           </div>
         </div>
