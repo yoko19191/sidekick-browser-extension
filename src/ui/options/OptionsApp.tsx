@@ -1,5 +1,5 @@
 import {
-  Brain, CheckCircle2, ChevronDown, Cpu, Database, Download, Eye, EyeOff, Globe2, Keyboard, KeyRound, Languages, Loader2, MessageSquareText, Monitor, Moon, Palette, Plus, RefreshCw, RotateCcw, ShieldCheck, Sun, Trash2, Upload, X, XCircle, Zap,
+  Brain, CheckCircle2, ChevronDown, Cpu, Database, Download, Eye, EyeOff, Globe2, Keyboard, KeyRound, Languages, Loader2, MessageSquareText, Monitor, Moon, MousePointerClick, Palette, Plus, RefreshCw, RotateCcw, ShieldCheck, Sun, Trash2, Upload, X, XCircle, Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { STYLE_LABELS } from "@/src/lib/batch";
@@ -14,7 +14,7 @@ import { useProviders, useSettings, useTheme } from "../hooks";
 import { bg } from "../messaging";
 import { tr } from "@/src/i18n";
 
-type SectionId = "models" | "translation" | "chat" | "appearance" | "shortcuts" | "data";
+type SectionId = "models" | "translation" | "chat" | "appearance" | "shortcuts" | "data" | "agent";
 const SECTIONS: { id: SectionId; label: string; icon: typeof KeyRound }[] = [
   { id: "models", label: tr("nav.models"), icon: KeyRound },
   { id: "translation", label: tr("nav.translation"), icon: Languages },
@@ -22,6 +22,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof KeyRound }[] = [
   { id: "appearance", label: tr("nav.appearance"), icon: Palette },
   { id: "shortcuts", label: tr("nav.shortcuts"), icon: Keyboard },
   { id: "data", label: tr("nav.data"), icon: ShieldCheck },
+  { id: "agent", label: tr("nav.agent"), icon: MousePointerClick },
 ];
 
 type Ctx = { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ReturnType<typeof useProviders> };
@@ -65,6 +66,7 @@ export function OptionsApp() {
             {section === "appearance" && <AppearanceSection {...ctx} />}
             {section === "shortcuts" && <ShortcutsSection />}
             {section === "data" && <DataSection {...ctx} />}
+            {section === "agent" && <AgentSection />}
           </div>
         </main>
       </div>
@@ -452,5 +454,90 @@ function DataSection({ update }: Ctx) {
         </div>
       </Advanced>
     </>
+  );
+}
+
+function AgentSection() {
+  const [neverSites, setNever] = useState<{ site: string }[]>([]);
+  const [allows, setAllows] = useState<{ site: string; kinds: string[] }[]>([]);
+  const [runs, setRuns] = useState<{ id: string; task: string; url: string; status: string; startedAt: number; steps: number }[]>([]);
+  const [siteIn, setSiteIn] = useState("");
+  const toast = useToast();
+  const reload = async () => {
+    const { agentStore } = await import("@/src/agent/store");
+    const policies = await agentStore.listPolicies();
+    setNever(policies.filter((p) => p.neverAct).map((p) => ({ site: p.site })));
+    setAllows(policies.filter((p) => (p.allowKinds?.length ?? 0) > 0).map((p) => ({ site: p.site, kinds: p.allowKinds! })));
+    setRuns(await agentStore.listRuns(30));
+  };
+  useEffect(() => { void reload(); }, []);
+  const addNever = async () => {
+    const site = siteIn.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+    if (!site) return;
+    const { agentStore } = await import("@/src/agent/store");
+    const prev = (await agentStore.getPolicy(site)) ?? { site, updatedAt: Date.now() };
+    await agentStore.setPolicy({ ...prev, neverAct: true, updatedAt: Date.now() });
+    setSiteIn("");
+    toast({ text: tr("agent.addSite"), tone: "info" });
+    await reload();
+  };
+  const remove = async (site: string, field: "never" | "allow") => {
+    const { agentStore } = await import("@/src/agent/store");
+    const prev = await agentStore.getPolicy(site);
+    if (!prev) return;
+    if (field === "never") {
+      if (!(prev.allowKinds?.length)) await agentStore.deletePolicy(site);
+      else await agentStore.setPolicy({ ...prev, neverAct: false, updatedAt: Date.now() });
+    } else {
+      if (!prev.neverAct) await agentStore.deletePolicy(site);
+      else await agentStore.setPolicy({ ...prev, allowKinds: [], updatedAt: Date.now() });
+    }
+    await reload();
+  };
+  return (
+    <div className="mt-6 space-y-6">
+      <Card>
+        <SectionLabel>{tr("agent.neverSites")}</SectionLabel>
+        <p className="mb-3 text-[13px] text-muted-foreground">{tr("agent.neverSitesHelp")}</p>
+        <div className="flex gap-2">
+          <input className={inputCls} placeholder={tr("agent.sitePlaceholder")} value={siteIn} onChange={(e) => setSiteIn(e.target.value)} data-testid="agent-never-input" />
+          <Button onClick={addNever} testId="agent-never-add">{tr("agent.addSite")}</Button>
+        </div>
+        <ul className="mt-3 space-y-1" data-testid="agent-never-list">
+          {neverSites.map((s) => (
+            <li key={s.site} className="flex items-center justify-between rounded-btn bg-muted/50 px-3 py-1.5 text-[13px]">
+              <span>{s.site}</span>
+              <button className="text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "never")}>{tr("agent.remove")}</button>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      <Card>
+        <SectionLabel>{tr("agent.noConfirmSites")}</SectionLabel>
+        <p className="mb-3 text-[13px] text-muted-foreground">{tr("agent.noConfirmHelp")}</p>
+        <ul className="space-y-1" data-testid="agent-allow-list">
+          {allows.length === 0 && <li className="text-[13px] text-muted-foreground">—</li>}
+          {allows.map((s) => (
+            <li key={s.site} className="flex items-center justify-between rounded-btn bg-muted/50 px-3 py-1.5 text-[13px]">
+              <span>{s.site} <span className="text-muted-foreground">({s.kinds.join(", ")})</span></span>
+              <button className="text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "allow")}>{tr("agent.remove")}</button>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      <Card>
+        <SectionLabel>{tr("agent.history")}</SectionLabel>
+        <ul className="mt-2 max-h-80 space-y-1 overflow-y-auto" data-testid="agent-history">
+          {runs.length === 0 && <li className="text-[13px] text-muted-foreground">{tr("agent.historyEmpty")}</li>}
+          {runs.map((r) => (
+            <li key={r.id} className="rounded-btn border border-border/60 px-3 py-2 text-[12.5px]">
+              <div className="font-medium">{r.task}</div>
+              <div className="truncate text-muted-foreground">{r.url}</div>
+              <div className="text-muted-foreground">{r.status} · {r.steps} steps · {new Date(r.startedAt).toLocaleString()}</div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
   );
 }

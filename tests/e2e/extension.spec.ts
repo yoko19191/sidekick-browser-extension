@@ -87,10 +87,10 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await page.close();
   });
 
-  test("options page: left nav, 6 sections, advanced collapsed by default, provider detail expands", async () => {
+  test("options page: left nav, 7 sections, advanced collapsed by default, provider detail expands", async () => {
     const opt = await context.newPage();
     await opt.goto(`chrome-extension://${extId}/options.html`);
-    for (const s of ["models", "translation", "chat", "appearance", "shortcuts", "data"]) {
+    for (const s of ["models", "translation", "chat", "appearance", "shortcuts", "data", "agent"]) {
       await opt.getByTestId(`nav-${s}`).click();
       await expect(opt.getByTestId(`section-${s}`)).toBeVisible();
     }

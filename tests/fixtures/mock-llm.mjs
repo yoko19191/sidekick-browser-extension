@@ -142,7 +142,7 @@ export function startMock(port = 0) {
         const calls = body.messages.flatMap((m) => m.tool_calls ?? []).map((c) => c.function.name);
         const id = (re) => all.match(re)?.[1];
         let call;
-        if (!calls.includes("input")) call = { name: "input", args: { index: id(/\[(f\d+:\d+)\][<‹]input type=text/), text: "Ada" } };
+        if (!calls.includes("input")) call = { name: "input", args: { index: id(/\[(f\d+:\d+)\][<‹]input type=text/), text: all.includes("LONGTYPE") ? "x".repeat(400) : "Ada" } };
         else if (!calls.includes("click") && toolNames.includes("click")) call = { name: "click", args: { index: id(/\[(f\d+:\d+)\][<‹]button[^>›]*[>›]Submit/) } };
         else call = { name: "done", args: { success: true, text: "submitted" } };
         const a = JSON.stringify(call.args);

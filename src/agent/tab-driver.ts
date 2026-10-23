@@ -77,7 +77,14 @@ export class TabDriver implements PageDriver {
       return { ok: true, message: "went back" };
     }
     if (typeof action.args.index === "string") await this.call({ type: "agent:highlight", index: action.args.index }).catch(() => {});
-    return raceAbort(this.call({ type: "agent:execute", action }), signal);
+    // On stop, tell the page to halt in-flight work (per-character typing) instead of finishing in the background.
+    const onAbort = () => void this.call({ type: "agent:abort" }).catch(() => {});
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await raceAbort(this.call({ type: "agent:execute", action }), signal);
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
   async currentUrl(): Promise<string> {
     return (await chrome.tabs.get(this.tabId)).url ?? "";

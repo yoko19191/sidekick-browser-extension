@@ -275,8 +275,6 @@ export default defineBackground({
         attachAgentPort(port, {
           resolveModel: async () => resolveTask((await loadSettings()).models.chat),
           ensureInjected: ensureContentScript,
-          // user never-act list arrives with site policies (PR 4); built-in list applies now
-          neverSites: async () => [],
         });
         return;
       }

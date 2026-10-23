@@ -10,7 +10,8 @@ export type AgentPageMessage =
   | { type: "agent:describe"; index: string }
   | { type: "agent:execute"; action: ActionRequest }
   | { type: "agent:domChanged" }
-  | { type: "agent:highlight"; index?: string };
+  | { type: "agent:highlight"; index?: string }
+  | { type: "agent:abort" };
 
 let hl: HTMLElement | null = null;
 function highlight(index?: string) {
@@ -39,6 +40,10 @@ export async function handleAgentMessage(msg: AgentPageMessage): Promise<{ ok: t
       return { ok: true, data: await get().execute(msg.action) };
     case "agent:domChanged":
       return { ok: true, data: get().domChanged() };
+    case "agent:abort":
+      obs?.abort();
+      highlight();
+      return { ok: true };
     case "agent:highlight":
       highlight(msg.index);
       return { ok: true };

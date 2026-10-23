@@ -32,7 +32,7 @@ function fakePage(elements: Record<string, ElementInfo> = {}, start = "https://s
   return { driver, executed };
 }
 
-function setup(responses: FauxResponseStep[], elements?: Record<string, ElementInfo>, hooks: Partial<AgentHooks> = {}) {
+function setup(responses: FauxResponseStep[], elements?: Record<string, ElementInfo>, hooks: Partial<AgentHooks> = {}, allowedKinds?: string[]) {
   const core = createFauxCore({});
   core.setResponses(responses);
   const seen: string[] = [];
@@ -45,7 +45,7 @@ function setup(responses: FauxResponseStep[], elements?: Record<string, ElementI
     confirm: hooks.confirm ?? (async () => "allow-once"),
     askUser: hooks.askUser ?? (async () => "ok"),
   };
-  const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: h, maxSteps: 10 });
+  const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: h, maxSteps: 10, allowedKinds });
   return { agent, page, seen };
 }
 
@@ -133,6 +133,37 @@ describe("WebAgent on pi-agent-core", () => {
     expect(page.executed).toEqual(["click", "click"]);
   });
 
+  it("delete/payment confirms carry no kind, so the card offers no allow-kind / allow-site", async () => {
+    const reqs: any[] = [];
+    const confirm = vi.fn(async (r: any) => (reqs.push(r), "allow-site" as const));
+    const { agent } = setup([
+      turn(call("click", { index: "d" })),
+      turn(call("click", { index: "c" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { d: { index: "d", tag: "button", text: "Delete" }, c: { index: "c", tag: "button", text: "Confirm" } }, { confirm });
+    await agent.run("x");
+    expect(reqs[0].kind).toBeUndefined();
+    expect(reqs[1].kind).toBeTruthy();
+  });
+
+  it("site no-confirm kinds skip that confirm but never delete", async () => {
+    const reqs: any[] = [];
+    const confirm = vi.fn(async (r: any) => (reqs.push(r), "allow-once" as const));
+    // learn the kind string for the Confirm button first
+    const probe = setup([turn(call("click", { index: "c" })), turn(call("done", { text: "ok", success: true }))], { c: { index: "c", tag: "button", text: "Confirm" } }, { confirm });
+    await probe.agent.run("x");
+    const kind = reqs[0].kind as string;
+    confirm.mockClear();
+    const { agent, page } = setup([
+      turn(call("click", { index: "c" })),
+      turn(call("click", { index: "d" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { c: { index: "c", tag: "button", text: "Confirm" }, d: { index: "d", tag: "button", text: "Delete" } }, { confirm }, [kind]);
+    await agent.run("x");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(page.executed).toEqual(["click", "click"]);
+  });
+
   it("allow-kind on a confirm button skips the next same button but not delete", async () => {
     const confirm = vi.fn(async () => "allow-kind" as const);
     const { agent } = setup([
@@ -210,4 +241,49 @@ describe("WebAgent on pi-agent-core", () => {
     expect(Date.now() - t0).toBeLessThan(500);
     expect(r.status).toBe("stopped");
   });
+});
+
+describe("stop and timeout during a model request", () => {
+  const hanging = () => {
+    const core = createFauxCore({});
+    let sig: AbortSignal | undefined;
+    const streamFn = (_m: any, _c: any, o: any) => {
+      sig = o?.signal;
+      return new Promise(() => {}) as any; // a provider that ignores abort and never answers
+    };
+    return { core, streamFn, signal: () => sig };
+  };
+
+  it("stop ends the run within 500 ms even if the provider ignores the signal", async () => {
+    const { core, streamFn } = hanging();
+    const page = fakePage();
+    const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: { confirm: async () => "deny", askUser: async () => "" }, maxSteps: 5 });
+    const p = agent.run("do it");
+    await new Promise((r) => setTimeout(r, 50));
+    const t0 = Date.now();
+    agent.stop();
+    const out = await p;
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(out.status).toBe("stopped");
+  });
+
+  it("each model request carries a timeout signal", async () => {
+    const { core, streamFn, signal } = hanging();
+    const page = fakePage();
+    const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: { confirm: async () => "deny", askUser: async () => "" }, maxSteps: 5, requestTimeoutMs: 50 });
+    void agent.run("do it");
+    await new Promise((r) => setTimeout(r, 150));
+    expect(signal()?.aborted).toBe(true);
+    agent.stop();
+  });
+});
+
+it("an idle model request ends with the timeout code, not as a user stop", async () => {
+  const core = createFauxCore({});
+  const page = fakePage();
+  const streamFn = () => new Promise(() => {}) as any;
+  const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: { confirm: async () => "deny", askUser: async () => "" }, maxSteps: 5, idleTimeoutMs: 60 });
+  const out = await agent.run("do it");
+  expect(out.status).toBe("error");
+  expect((out as { error?: string }).error).toBe("model-timeout");
 });
