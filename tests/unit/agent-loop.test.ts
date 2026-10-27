@@ -267,6 +267,44 @@ describe("stop and timeout during a model request", () => {
     expect(out.status).toBe("stopped");
   });
 
+  it("stop aborts the in-flight request signal immediately", async () => {
+    const { core, streamFn, signal } = hanging();
+    const page = fakePage();
+    const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: { confirm: async () => "deny", askUser: async () => "" }, maxSteps: 5 });
+    const p = agent.run("do it");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(signal()?.aborted).toBe(false);
+    agent.stop();
+    expect(signal()?.aborted).toBe(true);
+    await p;
+  });
+
+  it("no new model request and no page action after stop", async () => {
+    const core = createFauxCore({});
+    const page = fakePage();
+    let requests = 0;
+    let release!: () => void;
+    const streamFn = (m: any, c: any, o: any) => {
+      requests++;
+      // first reply arrives only after stop was pressed, and asks for an action
+      return new Promise<void>((r) => (release = r)).then(() => {
+        core.setResponses([fauxAssistantMessage([fauxToolCall("scroll", { direction: "down" })], { stopReason: "toolUse" })]);
+        return core.streamSimple(m, c, o);
+      }) as any;
+    };
+    const actions: string[] = [];
+    const agent = new WebAgent({ model: core.getModel(), streamFn, driver: page.driver, hooks: { confirm: async () => "deny", askUser: async () => "", onStep: (s) => actions.push(...s.actions.filter((a) => !a.blocked).map((a) => a.name)) }, maxSteps: 5 });
+    const p = agent.run("do it");
+    await new Promise((r) => setTimeout(r, 30));
+    agent.stop();
+    release();
+    const out = await p;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(out.status).toBe("stopped");
+    expect(requests).toBe(1);
+    expect(actions).toEqual([]);
+  });
+
   it("each model request carries a timeout signal", async () => {
     const { core, streamFn, signal } = hanging();
     const page = fakePage();

@@ -246,8 +246,10 @@ test.describe("gate 3: stop timing", () => {
       await expect.poll(() => hang.startedAt ?? 0, { timeout: 15_000 }).toBeGreaterThan(0);
       await panel.waitForTimeout(300);
       await armStopTimer(panel);
+      const reqsAtStop = agentReqs;
       await panel.getByTestId("agent-stop").click();
       await panel.waitForTimeout(1500);
+      expect(agentReqs, "a new model request was sent after stop").toBe(reqsAtStop);
       const { t0, t1 } = await panel.evaluate(() => ({ t0: (window as any).__t0 as number, t1: (window as any).__t1 as number }));
       expect(t0).toBeGreaterThan(0);
       expect(t1, "stop button never went away").toBeGreaterThan(0);
