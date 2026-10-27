@@ -71,6 +71,8 @@ export class WebAgent {
     this.agent = new Agent({
       initialState: { systemPrompt: SYSTEM_PROMPT, model: opts.model, tools: buildTools(driver, hooks) },
       streamFn: ((model: unknown, ctx: unknown, o?: { signal?: AbortSignal }) => {
+        // After stop() no new model request may start.
+        if (this.stopped) throw new Error("stopped");
         // Idle timeout: abort only when nothing has streamed for idleTimeoutMs; a total cap is the backstop.
         const idle = new AbortController();
         const arm = () => {
@@ -85,7 +87,7 @@ export class WebAgent {
         arm();
         const total = AbortSignal.timeout(opts.requestTimeoutMs ?? 300_000);
         total.addEventListener("abort", () => { this.timedOut = true; this.releaseStop(); }, { once: true });
-        const signal = AbortSignal.any([idle.signal, total, ...(o?.signal ? [o.signal] : [])]);
+        const signal = AbortSignal.any([idle.signal, total, this.stopCtl.signal, ...(o?.signal ? [o.signal] : [])]);
         return (opts.streamFn as any)(model, ctx, { ...o, signal });
       }) as StreamFn,
       getApiKey: opts.getApiKey,
@@ -93,6 +95,7 @@ export class WebAgent {
 
       // Drop every earlier page snapshot and append exactly one fresh one.
       transformContext: async (messages, signal) => {
+        if (this.stopped) throw new Error("stopped");
         const snap = await driver.snapshot(signal);
         this.stepUrl = snap.url;
         const kept = messages.filter((m) => !isStateMessage(m));
@@ -115,6 +118,8 @@ ${escapePageText(snap.tree)}
       beforeToolCall: async ({ assistantMessage, toolCall, args }, signal) => {
         const t = this.turnOf(assistantMessage);
         t.count++;
+        // Queued tool calls never run once stopped.
+        if (this.stopped) return { block: true, reason: "stopped by the user" };
         const name = toolCall.name;
         const block = (reason: string) => {
           t.record.actions.push({ name, args, ok: false, message: reason, blocked: true });
@@ -145,6 +150,7 @@ ${escapePageText(snap.tree)}
       },
 
       afterToolCall: async ({ assistantMessage, toolCall, args, result }) => {
+        if (this.stopped) return undefined;
         const t = this.turnOf(assistantMessage);
         const msg = result.content.map((c: any) => c.text ?? "").join("");
         t.record.actions.push({ name: toolCall.name, args, ok: !result.isError, message: msg });
@@ -199,12 +205,14 @@ ${escapePageText(snap.tree)}
       await Promise.race([this.agent.prompt(task), this.stopGate]);
     } catch (e) {
       clearTimeout(this.idleTimer);
-      if (this.timedOut && !this.stopped) return { status: "error", steps: this.steps, error: TIMEOUT };
+      if (this.stopped) return { status: "stopped", steps: this.steps };
+      if (this.timedOut) return { status: "error", steps: this.steps, error: TIMEOUT };
       if (this.stopped) return { status: "stopped", steps: this.steps };
       return { status: "error", steps: this.steps, error: String((e as Error)?.message ?? e) };
     }
     clearTimeout(this.idleTimer);
-    if (this.timedOut && !this.stopped && !this.doneResult) { this.agent.abort(); return { status: "error", steps: this.steps, error: TIMEOUT }; }
+    if (this.stopped) return { status: "stopped", steps: this.steps };
+    if (this.timedOut && !this.doneResult) { this.agent.abort(); return { status: "error", steps: this.steps, error: TIMEOUT }; }
     if (this.doneResult) return { status: "done", ...this.doneResult, steps: this.steps };
     if (this.stopped) return { status: "stopped", steps: this.steps };
     const err = this.agent.state.errorMessage;
@@ -219,8 +227,14 @@ ${escapePageText(snap.tree)}
   private touch: () => void = () => {};
   private stopGate = new Promise<void>((r) => (this.releaseStop = r));
 
+  /** Aborts the in-flight fetch directly, independent of the agent's own signal. */
+  private stopCtl = new AbortController();
+
   stop() {
+    if (this.stopped) return;
     this.stopped = true;
+    this.stopCtl.abort(new Error("stopped"));
+    clearTimeout(this.idleTimer);
     this.releaseStop();
     this.agent.abort();
   }
