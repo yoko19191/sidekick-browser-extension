@@ -3,7 +3,7 @@ import { launch, openPanel, tabIdFor } from "./harness";
 import { startMock } from "../fixtures/mock-llm.mjs";
 
 // Real-Chromium checks for widget patterns that jsdom cannot reproduce (no layout, no checkVisibility):
-// a display:contents web-component dialog (Shoelace) and label-operated hidden checkboxes (IKEA).
+// a display:contents web-component dialog (Shoelace), label-operated hidden checkboxes (IKEA), target=_blank links.
 
 let context: BrowserContext;
 let extId: string;
@@ -70,4 +70,13 @@ test("hidden filter checkboxes are listed by their label and clicking one checks
   expect(r.ok, r.message).toBe(true);
   expect(await page.evaluate(() => (document.getElementById("w1") as HTMLInputElement).checked)).toBe(true);
   expect(await snapshot()).toMatch(/<input type=checkbox[^>]* checked>Width 61-120 cm/);
+});
+
+test("a target=_blank link opens in the agent's tab instead of a new tab", async () => {
+  const pagesBefore = context.pages().length;
+  const tree = await snapshot();
+  const r = await execute({ name: "click", args: { index: idOf(tree, "Open details") } });
+  expect(r.message).toContain("opened in this tab");
+  await page.waitForURL(/\?page=2$/);
+  expect(context.pages().length).toBe(pagesBefore);
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Widget patterns from real sites: web-component forms (Shoelace), custom-styled checkboxes (IKEA filters),
-// and key events that must cross shadow roots.
+// links that open a new tab, and key events that must cross shadow roots.
 import { beforeEach, describe, expect, it } from "vitest";
 import { PageObserver } from "../../src/agent/page/observer";
 
@@ -57,6 +57,46 @@ describe("custom-styled checkbox behind a visible label", () => {
     expect(r.ok).toBe(true);
     expect((document.getElementById("w0") as HTMLInputElement).checked).toBe(true);
     expect(o.snapshot().tree).toMatch(/<input type=checkbox[^>]* checked>0 - 1' 11"/);
+  });
+});
+
+describe("links and forms that open a new tab", () => {
+  it("a target=_blank link is followed in this tab, and the attribute is restored afterwards", async () => {
+    document.body.innerHTML = `<a href="#next" target="_blank">Details</a>`;
+    const a = document.querySelector("a")!;
+    let targetAtClick = "";
+    a.addEventListener("click", (e) => {
+      targetAtClick = a.target;
+      e.preventDefault(); // jsdom does not navigate
+    });
+    const o = new PageObserver(document);
+    const r = await o.execute({ name: "click", args: { index: idOf(o.snapshot().tree, "Details") } });
+    expect(targetAtClick).toBe("_top");
+    expect(a.getAttribute("target")).toBe("_blank");
+    expect(r.message).toContain("opened in this tab");
+  });
+
+  it("a link aimed at an iframe on the page keeps its target", async () => {
+    document.body.innerHTML = `<iframe name="preview"></iframe><a href="#p" target="preview">Preview</a>`;
+    const a = document.querySelector("a")!;
+    let targetAtClick = "";
+    a.addEventListener("click", (e) => ((targetAtClick = a.target), e.preventDefault()));
+    const o = new PageObserver(document);
+    const r = await o.execute({ name: "click", args: { index: idOf(o.snapshot().tree, "Preview") } });
+    expect(targetAtClick).toBe("preview");
+    expect(r.message).not.toContain("new tab");
+  });
+
+  it("a submit button's formtarget=_blank is pointed at this tab during the click", async () => {
+    document.body.innerHTML = `<form action="#done"><button formtarget="_blank">Export</button></form>`;
+    const form = document.querySelector("form")!;
+    const btn = document.querySelector("button")!;
+    let targetAtSubmit = "";
+    form.addEventListener("submit", (e) => ((targetAtSubmit = btn.getAttribute("formtarget")!), e.preventDefault()));
+    const o = new PageObserver(document);
+    await o.execute({ name: "click", args: { index: idOf(o.snapshot().tree, "Export") } });
+    expect(targetAtSubmit).toBe("_top");
+    expect(btn.getAttribute("formtarget")).toBe("_blank");
   });
 });
 

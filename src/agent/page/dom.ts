@@ -135,6 +135,34 @@ export function box(el: Element): Element {
   return (!visible(el) && labelProxy(el)) || el;
 }
 
+/** A link / form target that opens a new browsing context (new tab) rather than this document or a named frame. */
+function opensNewTab(target: string | null, doc: Document): boolean {
+  const t = (target ?? "").trim();
+  if (!t || /^_(self|parent|top)$/i.test(t)) return false;
+  if (/^_blank$/i.test(t)) return true;
+  return !Array.from(doc.querySelectorAll("iframe[name],frame[name]")).some((f) => f.getAttribute("name") === t);
+}
+
+/**
+ * The agent drives one tab, so a link or form that would open a new tab is pointed at this tab instead (_top, so a
+ * link inside an iframe replaces the page like a new tab would). Returns a function restoring the original attribute,
+ * or undefined when nothing needed changing.
+ */
+export function retargetToThisTab(el: Element, submitter: boolean): (() => void) | undefined {
+  const swap = (node: Element, attr: string) => {
+    const old = node.getAttribute(attr);
+    node.setAttribute(attr, "_top");
+    return () => (old === null ? node.removeAttribute(attr) : node.setAttribute(attr, old));
+  };
+  const link = composedClosest(el, "a[href],area[href]");
+  if (link) return opensNewTab(link.getAttribute("target"), el.ownerDocument) ? swap(link, "target") : undefined;
+  const form = formOf(el);
+  if (!form) return undefined;
+  // a submit button's formtarget overrides the form's own target
+  if (submitter && el.hasAttribute("formtarget")) return opensNewTab(el.getAttribute("formtarget"), el.ownerDocument) ? swap(el, "formtarget") : undefined;
+  return opensNewTab(form.getAttribute("target"), el.ownerDocument) ? swap(form, "target") : undefined;
+}
+
 /** Deepest element at a point, descending through open shadow roots. */
 function deepHit(doc: Document, x: number, y: number): Element | null {
   let hit = doc.elementFromPoint?.(x, y) ?? null;

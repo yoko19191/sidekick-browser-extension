@@ -14,6 +14,7 @@ import {
   labelOf,
   labelProxy,
   nearViewport,
+  retargetToThisTab,
   visible,
 } from "./dom";
 
@@ -281,8 +282,13 @@ export class PageObserver {
           seen.scrollIntoView?.({ block: "center" });
           if (isOccluded(seen)) return { ok: false, message: `element ${args.index} is covered by another element; close the overlay first` };
           el!.focus?.();
-          el!.click();
-          return { ok: true, message: `clicked ${args.index}` };
+          const restore = retargetToThisTab(el!, true);
+          try {
+            el!.click();
+          } finally {
+            restore?.();
+          }
+          return { ok: true, message: restore ? `clicked ${args.index}; it opens a new tab, so it was opened in this tab instead (go_back returns)` : `clicked ${args.index}` };
         }
         case "input": {
           if (isSensitive(el!)) return { ok: false, message: "refused: sensitive field" };
@@ -333,7 +339,14 @@ export class PageObserver {
           t.dispatchEvent(new win.KeyboardEvent("keyup", opts));
           if (ok && args.keys === "Enter") {
             const form = (t as HTMLInputElement).form;
-            if (form && t.tagName.toLowerCase() === "input") form.requestSubmit?.();
+            if (form && t.tagName.toLowerCase() === "input") {
+              const restore = retargetToThisTab(t, false);
+              try {
+                form.requestSubmit?.();
+              } finally {
+                restore?.();
+              }
+            }
           }
           return { ok: true, message: `pressed ${args.keys}` };
         }
