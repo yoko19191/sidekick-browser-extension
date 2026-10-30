@@ -325,3 +325,100 @@ it("an idle model request ends with the timeout code, not as a user stop", async
   expect(out.status).toBe("error");
   expect((out as { error?: string }).error).toBe("model-timeout");
 });
+
+describe("repeat detection, idle replies and the per-step cap", () => {
+  const loadMore = (index: string): ElementInfo => ({ index, tag: "button", text: "Load more" });
+
+  it("nudges when the same button is clicked 3 times even though re-rendering gave it a new id each time", async () => {
+    const { agent, seen } = setup([
+      turn(call("click", { index: "f0:1" })),
+      turn(call("click", { index: "f0:7" })),
+      turn(call("click", { index: "f0:12" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { "f0:1": loadMore("f0:1"), "f0:7": loadMore("f0:7"), "f0:12": loadMore("f0:12") });
+    await agent.run("x");
+    expect(seen[2]).not.toContain("repeated click");
+    expect(seen[3]).toContain('repeated click on \\"Load more\\" 3 times'); // seen[] holds JSON
+  });
+
+  it("a wait between the clicks does not hide the repeat", async () => {
+    const { agent, seen } = setup([
+      turn(call("click", { index: "a" }), call("wait", { seconds: 0 })),
+      turn(call("click", { index: "a" }), call("wait", { seconds: 0 })),
+      turn(call("click", { index: "a" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { a: loadMore("a") });
+    await agent.run("x");
+    expect(seen[3]).toContain("repeated click");
+  });
+
+  it("different buttons with the same id-less shape but different text are not a repeat", async () => {
+    const { agent, seen } = setup([
+      turn(call("click", { index: "a" })),
+      turn(call("click", { index: "b" })),
+      turn(call("click", { index: "a" })),
+      turn(call("done", { text: "ok", success: true })),
+    ], { a: loadMore("a"), b: { index: "b", tag: "button", text: "Next" } });
+    await agent.run("x");
+    expect(seen.join("")).not.toContain("repeated");
+  });
+
+  it("a reply without tool calls gets one reminder; the model can then finish normally", async () => {
+    const { agent, seen } = setup([
+      fauxAssistantMessage("I think the task is done.", { stopReason: "stop" }),
+      turn(call("done", { text: "ok", success: true })),
+    ]);
+    const r = await agent.run("x");
+    expect(r.status).toBe("done");
+    expect(seen[1]).toContain("called no tool");
+  });
+
+  it("two replies without tool calls end the run as no-action, not as an exhausted budget", async () => {
+    const { agent } = setup([
+      fauxAssistantMessage("Hmm.", { stopReason: "stop" }),
+      fauxAssistantMessage("Still thinking.", { stopReason: "stop" }),
+    ]);
+    const r = await agent.run("x");
+    expect(r).toMatchObject({ status: "error", error: "no-action", steps: 2 });
+  });
+
+  it("running out of steps is still reported as budget", async () => {
+    const { agent } = setup([turn(call("scroll", { down: true })), turn(call("scroll", { down: true }))]);
+    (agent as any).opts.maxSteps = 2;
+    expect((await agent.run("x")).status).toBe("budget");
+  });
+
+  it("blocked calls do not use up the per-step action cap", async () => {
+    const { agent, page } = setup([
+      turn(call("click", { index: "gone1" }), call("click", { index: "gone2" }), ...Array.from({ length: 5 }, () => call("scroll", { down: true }))),
+      turn(call("done", { text: "ok", success: true })),
+    ]);
+    await agent.run("x");
+    expect(page.executed).toEqual(["scroll", "scroll", "scroll", "scroll", "scroll"]);
+  });
+});
+
+describe("abort reasons", () => {
+  const hangingAgent = (extra: Record<string, unknown> = {}) => {
+    const core = createFauxCore({});
+    let sig: AbortSignal | undefined;
+    const streamFn = (_m: any, _c: any, o: any) => ((sig = o?.signal), new Promise(() => {})) as any;
+    const agent = new WebAgent({ model: core.getModel(), streamFn, driver: fakePage().driver, hooks: { confirm: async () => "deny", askUser: async () => "" }, maxSteps: 5, ...extra });
+    return { agent, signal: () => sig };
+  };
+
+  it("stop aborts the request with an AbortError", async () => {
+    const { agent, signal } = hangingAgent();
+    const p = agent.run("x");
+    await new Promise((r) => setTimeout(r, 30));
+    agent.stop();
+    await p;
+    expect((signal()?.reason as Error).name).toBe("AbortError");
+  });
+
+  it("an idle request is aborted with a TimeoutError", async () => {
+    const { agent, signal } = hangingAgent({ idleTimeoutMs: 40 });
+    await agent.run("x");
+    expect((signal()?.reason as Error).name).toBe("TimeoutError");
+  });
+});

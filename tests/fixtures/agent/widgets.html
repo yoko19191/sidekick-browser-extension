@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent widget patterns</title>
+<style>
+  /* Shoelace-style dialog: the host is display:contents, everything renders from its shadow root. shoelace.style
+     fades custom elements in, and on a display:contents host the fade stays at opacity 0 — which renders nothing,
+     since such a host has no box, but Chrome's checkVisibility({checkOpacity}) still counts it for descendants. */
+  x-dialog { display: contents; opacity: 0; }
+  .chip input { opacity: 0; position: absolute; width: 0; height: 0; }
+  .chip { display: inline-flex; gap: 6px; padding: 6px 10px; border: 1px solid #999; border-radius: 16px; position: relative; }
+</style>
+</head>
+<body>
+<h1>Widgets</h1>
+
+<!-- IKEA-style filter: the real checkbox is invisible, the label is what users click -->
+<fieldset><legend>Width</legend>
+  <label class="chip" for="w0"><span>Width 0-60 cm</span><input type="checkbox" id="w0"></label>
+  <label class="chip" for="w1"><span>Width 61-120 cm</span><input type="checkbox" id="w1"></label>
+</fieldset>
+
+<p><a id="newtab" href="/fixtures/agent/widgets.html?page=2" target="_blank">Open details</a></p>
+
+<x-dialog id="dlg" label="Welcome dialog" open>
+  <p>Dialog body text</p>
+  <!-- like <sl-button>: the real <button> is in the shadow root and gets its label through a slot -->
+  <x-button slot="footer" id="nothanks">No, thanks</x-button>
+</x-dialog>
+
+<script>
+  class XIconButton extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      this.attachShadow({ mode: "open" }).innerHTML = `<button type="button" aria-label="${this.getAttribute("label")}">×</button>`;
+    }
+  }
+  class XButton extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      this.attachShadow({ mode: "open" }).innerHTML = `<button type="button"><slot name="prefix"></slot><slot></slot></button>`;
+    }
+  }
+  class XDialog extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      const sr = this.attachShadow({ mode: "open" });
+      sr.innerHTML = `
+        <style>
+          .base { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10; }
+          .overlay { position: absolute; inset: 0; background: rgba(0,0,0,.4); }
+          .panel { position: relative; background: #fff; padding: 16px; min-width: 320px; }
+          :host(:not([open])) .base { display: none; }
+        </style>
+        <div class="base" part="base">
+          <div class="overlay" tabindex="-1"></div>
+          <div class="panel" role="dialog" aria-modal="true" tabindex="-1">
+            <header><h2>${this.getAttribute("label")}</h2><x-icon-button label="Close"></x-icon-button></header>
+            <slot></slot>
+            <footer><slot name="footer"></slot></footer>
+          </div>
+        </div>`;
+      sr.querySelector("x-icon-button").addEventListener("click", () => this.removeAttribute("open"));
+      this.querySelector("#nothanks")?.addEventListener("click", () => this.removeAttribute("open"));
+      // like Shoelace: Escape is handled on the document, so key events must be composed to reach it
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && this.hasAttribute("open")) this.removeAttribute("open"); });
+    }
+  }
+  customElements.define("x-icon-button", XIconButton);
+  customElements.define("x-button", XButton);
+  customElements.define("x-dialog", XDialog);
+</script>
+</body>
+</html>

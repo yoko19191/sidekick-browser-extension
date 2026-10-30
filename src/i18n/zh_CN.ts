@@ -264,6 +264,7 @@ export const zh_CN = {
   "agent.confirmTitle": "需要你确认",
   "agent.restricted": "这个页面不能操作：浏览器内部页（chrome:// 等）、扩展商店和新标签页不允许扩展运行脚本。请切到普通网页再试。",
   "agent.timeout": "模型请求超时：30 秒没收到任何内容，本次操作已结束。可以重试，或换个模型。",
+  "agent.noAction": "模型没有继续操作也没有报告结果就停下了（还没到步数上限）。可以换个说法重试，或换个模型。",
   "agent.neverSite": "这个网站在你的「禁止操作」名单里，已拒绝。可在设置 → 网页操作中修改。",
   "agent.allowOnce": "允许这一次",
   "agent.allowKind": "本任务内允许同类操作",
