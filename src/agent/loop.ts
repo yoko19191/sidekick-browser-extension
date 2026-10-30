@@ -51,6 +51,15 @@ function isStateMessage(m: AgentMessage): boolean {
 
 /** Error code when a model request stalls (idle) or exceeds the hard cap. */
 export const TIMEOUT = "model-timeout";
+/** Error code when the model twice ends its reply without calling any tool (not done, not out of steps). */
+export const NO_ACTION = "no-action";
+
+/** Same action on the same target this many times in a row (on one URL) triggers the "try something else" note. */
+export const REPEAT_LIMIT = 3;
+/** Observation-only actions: they neither count toward nor break a repeat streak (click, wait, click is still a repeat). */
+const NEUTRAL = new Set(["wait", "extract", "search_page"]);
+
+const abortError = () => new DOMException("stopped by the user", "AbortError");
 
 export class WebAgent {
   readonly agent: Agent;
@@ -62,7 +71,11 @@ export class WebAgent {
   private turn = new WeakMap<object, { count: number; truncated: boolean; record: StepRecord }>();
   private doneResult?: { success: boolean; text: string };
   private stopped = false;
-  private recent: string[] = [];
+  /** toolCall id -> repeat signature, computed in beforeToolCall where the target element is known. */
+  private sigs = new Map<string, { sig: string; label: string }>();
+  private repeat = { sig: "", n: 0 };
+  /** Consecutive replies without any tool call. */
+  private idleReplies = 0;
   private nudge = "";
 
   constructor(private readonly opts: WebAgentOptions) {
@@ -72,14 +85,14 @@ export class WebAgent {
       initialState: { systemPrompt: SYSTEM_PROMPT, model: opts.model, tools: buildTools(driver, hooks) },
       streamFn: ((model: unknown, ctx: unknown, o?: { signal?: AbortSignal }) => {
         // After stop() no new model request may start.
-        if (this.stopped) throw new Error("stopped");
+        if (this.stopped) throw abortError();
         // Idle timeout: abort only when nothing has streamed for idleTimeoutMs; a total cap is the backstop.
         const idle = new AbortController();
         const arm = () => {
           clearTimeout(this.idleTimer);
           this.idleTimer = setTimeout(() => {
             this.timedOut = true;
-            idle.abort(new Error("model request timed out"));
+            idle.abort(new DOMException("model request timed out", "TimeoutError"));
             this.releaseStop();
           }, opts.idleTimeoutMs ?? 30_000);
         };
@@ -95,7 +108,7 @@ export class WebAgent {
 
       // Drop every earlier page snapshot and append exactly one fresh one.
       transformContext: async (messages, signal) => {
-        if (this.stopped) throw new Error("stopped");
+        if (this.stopped) throw abortError();
         const snap = await driver.snapshot(signal);
         this.stepUrl = snap.url;
         const kept = messages.filter((m) => !isStateMessage(m));
@@ -117,7 +130,6 @@ ${escapePageText(snap.tree)}
 
       beforeToolCall: async ({ assistantMessage, toolCall, args }, signal) => {
         const t = this.turnOf(assistantMessage);
-        t.count++;
         // Queued tool calls never run once stopped.
         if (this.stopped) return { block: true, reason: "stopped by the user" };
         const name = toolCall.name;
@@ -125,11 +137,16 @@ ${escapePageText(snap.tree)}
           t.record.actions.push({ name, args, ok: false, message: reason, blocked: true });
           return { block: true, reason };
         };
+        // Only calls that actually run count toward the per-step cap; blocked ones are just reported back.
+        const allow = () => {
+          t.count++;
+          return undefined;
+        };
         if (t.truncated) return block("not executed: the page changed earlier in this step");
-        if (t.count > MAX_ACTIONS_PER_STEP) return block(`not executed: more than ${MAX_ACTIONS_PER_STEP} actions in one step`);
+        if (t.count >= MAX_ACTIONS_PER_STEP) return block(`not executed: more than ${MAX_ACTIONS_PER_STEP} actions in one step`);
         if (name === "done" && assistantMessage.content.filter((c: any) => c.type === "toolCall").length > 1)
           return block("done must be the only action in its step; check the other results first");
-        if (name === "done" || name === "ask_user") return undefined;
+        if (name === "done" || name === "ask_user") return allow();
 
         const a = args as Record<string, unknown>;
         const target = typeof a.index === "string" ? await driver.describe(a.index) : undefined;
@@ -146,7 +163,11 @@ ${escapePageText(snap.tree)}
           if (d === "deny") return block("the user declined this action");
           if ((d === "allow-kind" || d === "allow-site") && verdict.kind) this.allowedKinds.add(verdict.kind);
         }
-        return undefined;
+        // Identify the target by what it is, not by its id: a re-rendered button gets a new id on every snapshot.
+        const { index: _i, ...rest } = a;
+        const what = target ? [target.tag, target.role ?? "", target.text, target.href ?? ""].join("|") : "";
+        this.sigs.set(toolCall.id, { sig: [name, this.stepUrl, what, JSON.stringify(rest)].join("\n"), label: target?.text ? `${name} on "${target.text.slice(0, 40)}"` : name });
+        return allow();
       },
 
       afterToolCall: async ({ assistantMessage, toolCall, args, result }) => {
@@ -157,10 +178,7 @@ ${escapePageText(snap.tree)}
         if (toolCall.name === "done") this.doneResult = { success: !!(result.details as any)?.success, text: msg };
         if (TERMINATES.has(toolCall.name) || (await driver.currentUrl()) !== this.stepUrl) t.truncated = true;
         else if (toolCall.name !== "ask_user" && (await driver.domChanged?.())) t.truncated = true;
-        const sig = `${toolCall.name}:${JSON.stringify(args)}`;
-        this.recent = [...this.recent, sig].slice(-3);
-        if (this.recent.length === 3 && this.recent.every((x) => x === sig))
-          this.nudge = `You have repeated ${toolCall.name} with the same arguments 3 times. It is probably not working; try a different approach or ask_user.`;
+        this.noteRepeat(toolCall.id, toolCall.name);
         return undefined;
       },
 
@@ -175,7 +193,16 @@ ${escapePageText(snap.tree)}
         if (t) opts.hooks.onStep?.(t.record);
         if (this.doneResult || this.stopped) return { action: "end" };
         if (this.steps >= this.maxSteps) return { action: "end" };
-        return undefined;
+        if (message.stopReason === "error" || message.stopReason === "aborted") return undefined; // the loop ends on its own
+        // A reply with no tool call would end pi-agent-core's loop. Remind the model once; a second one in a row ends
+        // the run, and run() reports it as NO_ACTION rather than as an exhausted step budget.
+        if (message.content.some((c: any) => c.type === "toolCall")) {
+          this.idleReplies = 0;
+          return undefined;
+        }
+        if (++this.idleReplies >= 2) return { action: "end" };
+        this.nudge = "Your last reply called no tool. Continue the task with actions, or call done to finish and report.";
+        return { action: "continue" };
       },
     });
     // Any streamed event resets the idle timer; a finished message clears it.
@@ -198,6 +225,21 @@ ${escapePageText(snap.tree)}
     return t;
   }
 
+  /** Track consecutive identical actions; at REPEAT_LIMIT, leave a note for the next request. */
+  private noteRepeat(callId: string, name: string) {
+    const s = this.sigs.get(callId);
+    this.sigs.delete(callId);
+    if (NEUTRAL.has(name)) return;
+    if (!s) {
+      // ask_user / done: new information from the user breaks the streak
+      this.repeat = { sig: "", n: 0 };
+      return;
+    }
+    this.repeat = s.sig === this.repeat.sig ? { sig: s.sig, n: this.repeat.n + 1 } : { sig: s.sig, n: 1 };
+    if (this.repeat.n >= REPEAT_LIMIT)
+      this.nudge = `You have repeated ${s.label} ${this.repeat.n} times on this page. It is probably not working; try a different approach or ask_user.`;
+  }
+
   async run(task: string): Promise<RunOutcome> {
     this.startSite = siteOf(await this.opts.driver.currentUrl());
     try {
@@ -207,17 +249,17 @@ ${escapePageText(snap.tree)}
       clearTimeout(this.idleTimer);
       if (this.stopped) return { status: "stopped", steps: this.steps };
       if (this.timedOut) return { status: "error", steps: this.steps, error: TIMEOUT };
-      if (this.stopped) return { status: "stopped", steps: this.steps };
       return { status: "error", steps: this.steps, error: String((e as Error)?.message ?? e) };
     }
     clearTimeout(this.idleTimer);
     if (this.stopped) return { status: "stopped", steps: this.steps };
     if (this.timedOut && !this.doneResult) { this.agent.abort(); return { status: "error", steps: this.steps, error: TIMEOUT }; }
     if (this.doneResult) return { status: "done", ...this.doneResult, steps: this.steps };
-    if (this.stopped) return { status: "stopped", steps: this.steps };
     const err = this.agent.state.errorMessage;
     if (err) return { status: "error", steps: this.steps, error: err };
-    return { status: "budget", steps: this.steps };
+    // finishTurn only ends early on done / stop / the step cap; anything else is the model giving up without done.
+    if (this.steps >= this.maxSteps) return { status: "budget", steps: this.steps };
+    return { status: "error", steps: this.steps, error: NO_ACTION };
   }
 
   /** Stop button: aborts the in-flight request / tool and ends the run. */
@@ -233,7 +275,7 @@ ${escapePageText(snap.tree)}
   stop() {
     if (this.stopped) return;
     this.stopped = true;
-    this.stopCtl.abort(new Error("stopped"));
+    this.stopCtl.abort(abortError());
     clearTimeout(this.idleTimer);
     this.releaseStop();
     this.agent.abort();

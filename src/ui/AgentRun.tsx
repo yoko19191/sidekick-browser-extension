@@ -61,6 +61,7 @@ export function AgentRun({ tabId, task, onClose }: { tabId: number; task: string
     : outcome.error === "restricted-page" ? tr("agent.restricted")
     : outcome.error === "never-site" ? tr("agent.neverSite")
     : outcome.error === "model-timeout" ? tr("agent.timeout")
+    : outcome.error === "no-action" ? tr("agent.noAction")
     : tr("agent.error", { msg: outcome.error ?? "" });
 
   return (

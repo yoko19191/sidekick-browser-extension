@@ -1,12 +1,15 @@
 /** PageDriver backed by a browser tab: talks to the content-script host via chrome.tabs.sendMessage. */
 import type { ActionRequest, ActionResult, ElementInfo, PageDriver, PageSnapshot } from "./types";
 
+/** Same error shape fetch() uses on abort, so callers can tell a stop from a failure by `name`. */
+const aborted = () => new DOMException("aborted", "AbortError");
+
 /** Sleep that rejects as soon as `signal` aborts, so stop never waits out a timer. */
 export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new Error("aborted"));
+    if (signal?.aborted) return reject(aborted());
     const t = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
-    const onAbort = () => { clearTimeout(t); reject(new Error("aborted")); };
+    const onAbort = () => { clearTimeout(t); reject(aborted()); };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -14,9 +17,9 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
 /** Resolve `p`, or reject immediately when `signal` aborts. */
 function raceAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return p;
-  if (signal.aborted) return Promise.reject(new Error("aborted"));
+  if (signal.aborted) return Promise.reject(aborted());
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(new Error("aborted"));
+    const onAbort = () => reject(aborted());
     signal.addEventListener("abort", onAbort, { once: true });
     p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
