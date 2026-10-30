@@ -3,7 +3,19 @@
  * so it can be unit-tested with jsdom. Walks open shadow roots and same-origin iframes.
  */
 import type { ActionRequest, ActionResult, ElementInfo, PageSnapshot } from "../types";
-import { clean, deepQueryAll, formOf, isInteractive, isOccluded, isSensitive, labelOf, nearViewport, visible } from "./dom";
+import {
+  box,
+  clean,
+  deepQueryAll,
+  formOf,
+  isInteractive,
+  isOccluded,
+  isSensitive,
+  labelOf,
+  labelProxy,
+  nearViewport,
+  visible,
+} from "./dom";
 
 const MAX_TREE = 40_000;
 
@@ -96,7 +108,7 @@ export class PageObserver {
       formSensitive: !!facts?.sensitive,
       sensitive: isSensitive(el),
       href: tag === "a" ? (el as HTMLAnchorElement).href : undefined,
-      occluded: isOccluded(el),
+      occluded: isOccluded(box(el)),
     };
   }
 
@@ -122,7 +134,8 @@ export class PageObserver {
       for (const el of Array.from(kids)) {
         const tag = el.tagName.toLowerCase();
         if (["script", "style", "noscript", "template", "svg", "head"].includes(tag)) continue;
-        if (!visible(el)) continue;
+        // A hidden checkbox/radio still counts when its visible label stands in for it.
+        if (!visible(el) && !labelProxy(el)) continue;
         const pad = "  ".repeat(Math.min(depth, 6));
         if (tag === "iframe") {
           try {
@@ -147,9 +160,9 @@ export class PageObserver {
         }
         if (isInteractive(el)) {
           // Prefer elements near the viewport; far ones are counted, not fully listed (saves tokens on huge pages).
-          if (!nearViewport(el, 1)) {
+          if (!nearViewport(box(el), 1)) {
             outside++;
-            const top = (el as HTMLElement).getBoundingClientRect?.().top ?? 0;
+            const top = (box(el) as HTMLElement).getBoundingClientRect?.().top ?? 0;
             const where = top < 0 ? "above" : "below";
             const key = `${where}|${heading}`;
             const g = groups.get(key) ?? { where, heading, count: 0, labels: [] };
@@ -167,7 +180,7 @@ export class PageObserver {
           if (info.type) attrs.push(`type=${info.type}`);
           if (info.role) attrs.push(`role=${info.role}`);
           if (info.sensitive) attrs.push("sensitive");
-          if (isOccluded(el)) attrs.push("occluded");
+          if (info.occluded) attrs.push("occluded");
           if (tag === "select") {
             const opts = Array.from((el as HTMLSelectElement).options).slice(0, 12).map((o) => clean(o.text, 30));
             attrs.push(`options="${opts.join("|")}"`);
@@ -264,8 +277,9 @@ export class PageObserver {
     try {
       switch (a.name) {
         case "click": {
-          el!.scrollIntoView?.({ block: "center" });
-          if (isOccluded(el!)) return { ok: false, message: `element ${args.index} is covered by another element; close the overlay first` };
+          const seen = box(el!); // a hidden checkbox is scrolled to and hit-tested through its label
+          seen.scrollIntoView?.({ block: "center" });
+          if (isOccluded(seen)) return { ok: false, message: `element ${args.index} is covered by another element; close the overlay first` };
           el!.focus?.();
           el!.click();
           return { ok: true, message: `clicked ${args.index}` };
@@ -313,7 +327,8 @@ export class PageObserver {
         }
         case "send_keys": {
           const t = (el ?? (this.doc.activeElement as HTMLElement) ?? this.doc.body) as HTMLElement;
-          const opts = { key: args.keys, bubbles: true, cancelable: true };
+          // composed: real key events cross shadow roots (Shoelace closes dialogs from a document-level Escape listener)
+          const opts = { key: args.keys, bubbles: true, cancelable: true, composed: true };
           const ok = t.dispatchEvent(new win.KeyboardEvent("keydown", opts));
           t.dispatchEvent(new win.KeyboardEvent("keyup", opts));
           if (ok && args.keys === "Enter") {

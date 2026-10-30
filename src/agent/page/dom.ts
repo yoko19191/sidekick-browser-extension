@@ -11,10 +11,19 @@ const MAX_TEXT = 80;
 export function visible(el: Element): boolean {
   const he = el as HTMLElement;
   if (he.hidden) return false;
-  const anyEl = el as any;
-  if (typeof anyEl.checkVisibility === "function" && !anyEl.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
   const win = el.ownerDocument.defaultView;
   const st = win?.getComputedStyle?.(el);
+  // display:contents boxes nothing itself (checkVisibility() is false for it), but its children render normally —
+  // e.g. Shoelace's <sl-dialog> host. Let each child decide.
+  if (st?.display === "contents") return true;
+  const anyEl = el as any;
+  if (typeof anyEl.checkVisibility === "function") {
+    if (!anyEl.checkVisibility({ checkVisibilityCSS: true })) return false;
+    // Chrome's checkOpacity also counts opacity:0 on display:contents ancestors, which renders nothing (Shoelace's docs
+    // fade custom elements in, and on a display:contents host that fade stays at 0). Only on that slow path, re-check
+    // the ancestors ourselves and skip the display:contents ones.
+    if (!anyEl.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && transparentAncestor(el)) return false;
+  }
   if (st) {
     if (st.display === "none" || st.visibility === "hidden" || st.opacity === "0") return false;
     const fs = parseFloat(st.fontSize);
@@ -31,6 +40,17 @@ export function visible(el: Element): boolean {
     }
   } catch { /* jsdom */ }
   return true;
+}
+
+/** `el` or a flat-tree ancestor that actually renders (not display:contents) has opacity 0. */
+function transparentAncestor(el: Element): boolean {
+  const win = el.ownerDocument.defaultView;
+  for (let n: Node | null = el; n; n = composedParent(n)) {
+    if (n.nodeType !== 1) continue;
+    const st = win?.getComputedStyle?.(n as Element);
+    if (st && st.display !== "contents" && st.opacity === "0") return true;
+  }
+  return false;
 }
 
 /** Element centre is inside (or within one screen of) the viewport. */
@@ -99,6 +119,22 @@ export function deepQueryAll(root: ParentNode, selector: string): Element[] {
   return out;
 }
 
+/**
+ * A checkbox/radio that is visually hidden (opacity 0, 0×0, display:none…) and operated through its visible <label>,
+ * the usual custom-styled toggle (IKEA filters). The label is what the user sees and clicks.
+ */
+export function labelProxy(el: Element): HTMLLabelElement | undefined {
+  if (el.tagName.toLowerCase() !== "input") return undefined;
+  const i = el as HTMLInputElement;
+  if ((i.type !== "checkbox" && i.type !== "radio") || i.disabled) return undefined;
+  return Array.from(i.labels ?? []).find((l) => visible(l));
+}
+
+/** What the user sees for `el`: itself, or the label standing in for a hidden checkbox/radio. */
+export function box(el: Element): Element {
+  return (!visible(el) && labelProxy(el)) || el;
+}
+
 /** Deepest element at a point, descending through open shadow roots. */
 function deepHit(doc: Document, x: number, y: number): Element | null {
   let hit = doc.elementFromPoint?.(x, y) ?? null;
@@ -142,23 +178,21 @@ function tinyOrOffDoc(el: Element): boolean {
 /**
  * Text of `root` built only from text nodes whose element chain (up to and including root) passes `isShown`.
  * innerText/textContent would leak opacity:0, tiny-font or display:none text into names (prompt-injection vector).
+ * Walks the flat tree like an accessible-name computation: a shadow host shows its shadow content, and a <slot>
+ * shows what is assigned to it — <sl-button>'s inner <button> gets its label "No, thanks" only through a slot.
  */
 function shownText(root: Element, isShown: (el: Element) => boolean = visible): string {
-  const ok = new Map<Element, boolean>();
-  const shown = (el: Element): boolean => {
-    const c = ok.get(el);
-    if (c !== undefined) return c;
-    const v = isShown(el) && (el === root || !el.parentElement || shown(el.parentElement));
-    ok.set(el, v);
-    return v;
-  };
   const out: string[] = [];
-  const doc = root.ownerDocument;
-  const tw = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
-  for (let n = tw.nextNode(); n; n = tw.nextNode()) {
-    const p = n.parentElement;
-    if (p && shown(p)) out.push(n.nodeValue ?? "");
-  }
+  const visit = (n: Node) => {
+    if (n.nodeType === 3) return void out.push(n.nodeValue ?? "");
+    if (n.nodeType !== 1 || !isShown(n as Element)) return;
+    const el = n as Element;
+    const assigned = el.tagName === "SLOT" ? (el as HTMLSlotElement).assignedNodes({ flatten: true }) : [];
+    // a slot with nothing assigned renders its fallback children
+    const kids = assigned.length ? assigned : Array.from((el.shadowRoot ?? el).childNodes);
+    for (const k of kids) visit(k);
+  };
+  visit(root);
   return out.join(" ");
 }
 
