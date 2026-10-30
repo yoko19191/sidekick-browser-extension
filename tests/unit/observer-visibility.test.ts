@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { PageObserver, visible } from "../../src/agent/page/observer";
+import { PageObserver } from "../../src/agent/page/observer";
+import { visible } from "../../src/agent/page/dom";
 
 it("skips display:none, opacity 0, and near-zero font text", () => {
   document.body.innerHTML = `
@@ -105,7 +106,7 @@ it("marks closed shadow roots and cross-origin iframes as unreachable", () => {
 
 describe("occlusion across shadow DOM", () => {
   it("a slotted or shadow-internal hit does not count as occluding its host", async () => {
-    const { composedContains } = await import("../../src/agent/page/observer");
+    const { composedContains } = await import("../../src/agent/page/dom");
     const host = document.createElement("sl-button");
     const root = host.attachShadow({ mode: "open" });
     const inner = document.createElement("button");
