@@ -1,6 +1,6 @@
 /**
  * DOM facts the observer builds on: what a user can see, what is interactive or sensitive, composed-tree (shadow DOM)
- * navigation, and accessible names. Pure DOM, no chrome.* calls, so it runs in jsdom tests.
+ * navigation, form ownership, and accessible names. Pure DOM, no chrome.* calls, so it runs in jsdom tests.
  */
 const INTERACTIVE_ROLES = new Set(["button", "link", "checkbox", "radio", "switch", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "combobox", "textbox", "searchbox", "slider", "spinbutton", "treeitem"]);
 const SENSITIVE_AUTOCOMPLETE = /^(current-password|new-password|one-time-code|cc-|cc$)/i;
@@ -79,6 +79,24 @@ function composedParent(n: Node): Node | null {
 export function composedContains(outer: Node, inner: Node): boolean {
   for (let n: Node | null = inner; n; n = composedParent(n)) if (n === outer) return true;
   return false;
+}
+
+/** Element.closest() that also climbs out of shadow roots (a web component's inner button sits in its host's form). */
+function composedClosest(el: Element, selector: string): Element | null {
+  for (let n: Node | null = el; n; n = composedParent(n)) if (n.nodeType === 1 && (n as Element).matches(selector)) return n as Element;
+  return null;
+}
+
+/** The form an element submits: its own form owner, else the nearest <form> in the composed tree. */
+export function formOf(el: Element): HTMLFormElement | null {
+  return (el as HTMLInputElement).form ?? (composedClosest(el, "form") as HTMLFormElement | null);
+}
+
+/** querySelectorAll that also searches open shadow roots below `root`. */
+export function deepQueryAll(root: ParentNode, selector: string): Element[] {
+  const out = Array.from(root.querySelectorAll(selector));
+  for (const el of Array.from(root.querySelectorAll("*"))) if (el.shadowRoot) out.push(...deepQueryAll(el.shadowRoot, selector));
+  return out;
 }
 
 /** Deepest element at a point, descending through open shadow roots. */

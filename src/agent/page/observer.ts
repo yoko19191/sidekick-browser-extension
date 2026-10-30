@@ -3,7 +3,7 @@
  * so it can be unit-tested with jsdom. Walks open shadow roots and same-origin iframes.
  */
 import type { ActionRequest, ActionResult, ElementInfo, PageSnapshot } from "../types";
-import { clean, isInteractive, isOccluded, isSensitive, labelOf, nearViewport, visible } from "./dom";
+import { clean, deepQueryAll, formOf, isInteractive, isOccluded, isSensitive, labelOf, nearViewport, visible } from "./dom";
 
 const MAX_TREE = 40_000;
 
@@ -60,12 +60,30 @@ export class PageObserver {
     return id;
   }
 
+  /** Per-snapshot cache: one form is shared by all its controls, and searching it (shadow roots included) is not free. */
+  private forms = new Map<HTMLFormElement, { submitText?: string; sensitive: boolean }>();
+
+  private formFacts(form: HTMLFormElement) {
+    let f = this.forms.get(form);
+    if (!f) {
+      // Deep queries: a web-component form (Shoelace etc.) keeps its real <button>/<input> inside shadow roots.
+      const submitText = deepQueryAll(form, "button[type=submit],button:not([type]),input[type=submit],input[type=image]")
+        .map((b) => clean((b as HTMLInputElement).value || b.textContent || b.getAttribute("aria-label"), 40))
+        .filter(Boolean)
+        .join(" / ");
+      f = { submitText: submitText || undefined, sensitive: deepQueryAll(form, "input,textarea,select").some((x) => isSensitive(x)) };
+      this.forms.set(form, f);
+    }
+    return f;
+  }
+
   private describeEl(el: Element, id: string): ElementInfo {
     const tag = el.tagName.toLowerCase();
     const i = el as HTMLInputElement;
-    const form = (el as HTMLInputElement).form ?? el.closest("form");
-    const isSubmit =
-      !!form && ((tag === "button" && (i.type === "submit" || !el.getAttribute("type"))) || (tag === "input" && (i.type === "submit" || i.type === "image")));
+    const form = formOf(el);
+    // HTMLButtonElement.type is "submit" when the attribute is missing or invalid.
+    const isSubmit = !!form && ((tag === "button" && i.type === "submit") || (tag === "input" && (i.type === "submit" || i.type === "image")));
+    const facts = form ? this.formFacts(form) : undefined;
     return {
       index: id,
       tag,
@@ -73,14 +91,9 @@ export class PageObserver {
       type: tag === "input" ? i.type : undefined,
       role: el.getAttribute("role") ?? undefined,
       inForm: !!form,
-      formSubmitText: form
-        ? Array.from(form.querySelectorAll('button[type=submit],button:not([type]),input[type=submit],input[type=image]'))
-            .map((b) => clean((b as HTMLInputElement).value || b.textContent || b.getAttribute("aria-label"), 40))
-            .filter(Boolean)
-            .join(" / ") || undefined
-        : undefined,
+      formSubmitText: facts?.submitText,
       isSubmit,
-      formSensitive: !!form && Array.from(form.querySelectorAll("input,textarea,select")).some((f) => isSensitive(f)),
+      formSensitive: !!facts?.sensitive,
       sensitive: isSensitive(el),
       href: tag === "a" ? (el as HTMLAnchorElement).href : undefined,
       occluded: isOccluded(el),
@@ -89,6 +102,7 @@ export class PageObserver {
 
   snapshot(): PageSnapshot {
     this.byId.clear();
+    this.forms.clear();
     const lines: string[] = [];
     const max = this.opts.maxTree ?? MAX_TREE;
     let size = 0;
@@ -218,6 +232,7 @@ export class PageObserver {
   describe(id: string): ElementInfo | undefined {
     const e = this.byId.get(id);
     if (!e || !e.el.isConnected) return undefined;
+    this.forms.clear(); // the page may have changed since the snapshot
     return this.describeEl(e.el, id);
   }
 

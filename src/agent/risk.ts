@@ -96,12 +96,15 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
     }
     case "click": {
       if (target?.href && isForbiddenUrl(target.href, never)) return { level: 3, reason: "link leads to a site on the never-act list" };
-      const btn = `${target?.text ?? ""} ${target?.role ?? ""}`;
-      if (DESTRUCTIVE.test(btn)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" deletes something; confirm every time` };
-      if (PAYMENT.test(btn)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" involves payment; confirm every time` };
-      if (target?.isSubmit && target.formSensitive) return { level: 2, reason: "submits a form with password or payment fields; confirm every time" };
-      if (target?.isSubmit) return { level: 2, reason: "submits a form", kind: `submit:${siteOf(ctx.currentUrl)}` };
       const label = `${target?.text ?? ""} ${target?.role ?? ""}`;
+      if (DESTRUCTIVE.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" deletes something; confirm every time` };
+      if (PAYMENT.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" involves payment; confirm every time` };
+      // Inside a form, a "submit / confirm / send…" button is that form's submit even when it is type=button with a
+      // script handler: classify it like a native submit, so one "allow submits on this site" covers it, while
+      // forms with password or payment fields keep asking every time.
+      const submitsForm = !!target?.isSubmit || (!!target?.inForm && CONSEQUENTIAL.test(label));
+      if (submitsForm && target?.formSensitive) return { level: 2, reason: "submits a form with password or payment fields; confirm every time" };
+      if (submitsForm) return { level: 2, reason: "submits a form", kind: `submit:${siteOf(ctx.currentUrl)}` };
       if (CONSEQUENTIAL.test(label)) return { level: 2, reason: `button "${(target?.text ?? "").slice(0, 30)}" may have consequences`, kind: `consequential:${siteOf(ctx.currentUrl)}:${(target?.text ?? "").trim().toLowerCase().slice(0, 30)}` };
       if (target?.href && /^https?:/i.test(target.href) && siteOf(target.href) !== ctx.startSite)
         return { level: 2, reason: `link leads to another site: ${siteOf(target.href)}`, kind: `cross-site:${siteOf(target.href)}` };

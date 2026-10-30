@@ -62,3 +62,27 @@ describe("forms with password or payment fields always confirm (no allow-kind)",
     expect(classify({ name: "click", args: { index: "2" } }, { index: "2", tag: "button", text: "Go", isSubmit: true, inForm: true }, ctx).kind).toMatch(/^submit:/);
   });
 });
+
+describe("buttons that submit their form without being type=submit", () => {
+  const click = { name: "click", args: { index: "1" } };
+  it("a plain-form 提交 button (type=button, script handler) is a form submit with the site-wide submit kind", () => {
+    const v = classify(click, { index: "1", tag: "button", text: "提交", inForm: true }, ctx);
+    expect(v).toMatchObject({ level: 2, reason: "submits a form", kind: "submit:example.com" });
+    expect(effectiveLevel(v, new Set(["submit:example.com"]))).toBe(1);
+  });
+  it("the same kind of button in a password/payment form asks every time and offers no allow-kind", () => {
+    const v = classify(click, { index: "1", tag: "button", text: "Confirm", inForm: true, formSensitive: true }, ctx);
+    expect(v.level).toBe(2);
+    expect(v.kind).toBeUndefined();
+    expect(effectiveLevel(v, new Set(["submit:example.com"]))).toBe(2);
+  });
+  it("payment wording still wins over the submit rule", () => {
+    expect(classify(click, { index: "1", tag: "button", text: "Pay now", inForm: true }, ctx).kind).toBeUndefined();
+  });
+  it("outside any form a consequential button keeps its per-label kind", () => {
+    expect(classify(click, { index: "1", tag: "div", role: "button", text: "Post" }, ctx).kind).toBe("consequential:example.com:post");
+  });
+  it("an ordinary in-form button is still an ordinary click", () => {
+    expect(classify(click, { index: "1", tag: "button", text: "Show password rules", inForm: true }, ctx).level).toBe(1);
+  });
+});
