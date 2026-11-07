@@ -82,4 +82,17 @@ describe("PageObserver", () => {
     expect(tree.length).toBeLessThan(6000);
     expect(tree).toContain("truncated");
   });
+
+  it("dispatches beforeinput and InputEvent for contenteditable rich-text editors", async () => {
+    document.body.innerHTML = `<div id="ed" contenteditable="true" role="textbox" aria-label="Comment">old</div>`;
+    const ed = document.getElementById("ed")!;
+    const beforeTypes: string[] = [];
+    ed.addEventListener("beforeinput", (e) => beforeTypes.push((e as InputEvent).inputType));
+    const o = new PageObserver(document, { typeDelayMs: 0 });
+    const { tree } = o.snapshot();
+    const r = await o.execute({ name: "input", args: { index: idOf(tree, "Comment"), text: "hi" } });
+    expect(r.ok).toBe(true);
+    expect(ed.textContent).toBe("hi");
+    expect(beforeTypes).toEqual(["deleteContentBackward", "insertText", "insertText"]);
+  });
 });

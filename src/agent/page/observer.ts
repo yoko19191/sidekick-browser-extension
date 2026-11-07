@@ -294,20 +294,41 @@ export class PageObserver {
           if (isSensitive(el!)) return { ok: false, message: "refused: sensitive field" };
           el!.focus?.();
           const text = String(args.text);
+          const isEditable =
+            el!.isContentEditable ||
+            el!.getAttribute("contenteditable") === "true" ||
+            el!.getAttribute("contenteditable") === "";
           const proto = el instanceof win.HTMLTextAreaElement ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
           const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-          const setVal = (v: string) => (el!.isContentEditable ? (el!.textContent = v) : setter ? setter.call(el, v) : ((el as HTMLInputElement).value = v));
-          const getVal = () => (el!.isContentEditable ? (el!.textContent ?? "") : (el as HTMLInputElement).value);
-          if (args.clear !== false) setVal("");
-          // Type per character so key-driven pages behave, and so stop interrupts mid-way.
+          const setVal = (v: string) => (isEditable ? (el!.textContent = v) : setter ? setter.call(el, v) : ((el as HTMLInputElement).value = v));
+          const getVal = () => (isEditable ? (el!.textContent ?? "") : (el as HTMLInputElement).value);
+          const mkInputEvent = (type: "beforeinput" | "input", inputType: string, data: string | null) =>
+            typeof win.InputEvent === "function"
+              ? new win.InputEvent(type, { inputType, data, bubbles: true, cancelable: type === "beforeinput", composed: true })
+              : new win.Event(type, { bubbles: true, cancelable: type === "beforeinput", composed: true });
+          if (args.clear !== false) {
+            if (isEditable && getVal()) {
+              const delEv = mkInputEvent("beforeinput", "deleteContentBackward", null);
+              el!.dispatchEvent(delEv);
+              if (!delEv.defaultPrevented) setVal("");
+              el!.dispatchEvent(mkInputEvent("input", "deleteContentBackward", null));
+            } else {
+              setVal("");
+            }
+          }
+          // Type per character so key-driven pages and rich-text editors (ProseMirror/Slate/Lexical) behave, and so stop interrupts mid-way.
           const delay = this.opts.typeDelayMs ?? 12;
           for (const ch of text) {
             if (this.aborted) {
               el!.dispatchEvent(new win.Event("change", { bubbles: true }));
               return { ok: false, message: "aborted by user" };
             }
-            setVal(getVal() + ch);
-            el!.dispatchEvent(new win.Event("input", { bubbles: true }));
+            const beforeEv = mkInputEvent("beforeinput", "insertText", ch);
+            el!.dispatchEvent(beforeEv);
+            if (!isEditable || !beforeEv.defaultPrevented) {
+              setVal(getVal() + ch);
+            }
+            el!.dispatchEvent(mkInputEvent("input", "insertText", ch));
             if (delay > 0) await new Promise((r) => setTimeout(r, delay));
           }
           el!.dispatchEvent(new win.Event("change", { bubbles: true }));
