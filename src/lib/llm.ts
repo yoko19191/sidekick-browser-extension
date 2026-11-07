@@ -18,18 +18,35 @@ const API_OF: Record<ProviderKind, Api> = {
   gemini: "google-generative-ai",
 };
 
+export function inferModelMeta(modelId: string, kind: ProviderKind): { reasoning: boolean; contextWindow: number; maxTokens: number } {
+  const m = modelId.toLowerCase();
+  const reasoning = /reason|thinking|\br[12]\b|\bo[134](?:-|\b)|\bqwq\b|zero-preview/i.test(m);
+  let contextWindow = 128000;
+  const kMatch = m.match(/(?:^|[-_:])(\d+)k(?:\b|$)/);
+  if (kMatch) {
+    contextWindow = Number(kMatch[1]) * 1024;
+  } else if (kind === "gemini" || /\bgemini-(?:1\.5|2\.)|\bgpt-4\.1/i.test(m)) {
+    contextWindow = 1_000_000;
+  } else if (kind === "anthropic" || /\bclaude-(?:3|4|sonnet|opus|haiku)/i.test(m)) {
+    contextWindow = 200_000;
+  }
+  const maxTokens = reasoning ? 16384 : contextWindow <= 8192 ? 2048 : 8192;
+  return { reasoning, contextWindow, maxTokens };
+}
+
 export function toPiModel(p: ProviderConfig, modelId: string): Model<Api> {
+  const meta = inferModelMeta(modelId, p.kind);
   return {
     id: modelId,
     name: modelId,
     api: API_OF[p.kind],
     provider: `sidekick-${p.presetId}`,
     baseUrl: normalizeBaseUrl(p.baseUrl),
-    reasoning: /reason|thinking|r1\b|o\d/i.test(modelId),
+    reasoning: meta.reasoning,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 8192,
+    contextWindow: meta.contextWindow,
+    maxTokens: meta.maxTokens,
   } as Model<Api>;
 }
 

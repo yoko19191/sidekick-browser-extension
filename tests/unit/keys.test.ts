@@ -65,6 +65,7 @@ describe("settings defaults", () => {
 });
 
 import { friendlyError } from "@/src/lib/providers";
+import { inferModelMeta } from "@/src/lib/llm";
 describe("friendlyError", () => {
   it("maps common failures to readable reasons", () => {
     expect(friendlyError("HTTP 401 {\"error\":\"Incorrect API key\"}")).toMatch(/Key 无效/);
@@ -72,5 +73,15 @@ describe("friendlyError", () => {
     expect(friendlyError("TypeError: Failed to fetch")).toMatch(/网络不通/);
     expect(friendlyError("HTTP 404 model not found")).toMatch(/不存在/);
     expect(friendlyError("weird")).toBe("weird");
+  });
+});
+
+describe("inferModelMeta", () => {
+  it("infers reasoning flags, context windows, and maxTokens per model/provider", () => {
+    expect(inferModelMeta("deepseek-reasoner", "openai-compatible")).toEqual({ reasoning: true, contextWindow: 128000, maxTokens: 16384 });
+    expect(inferModelMeta("qwq-32b", "openai-compatible").reasoning).toBe(true);
+    expect(inferModelMeta("moonshot-v1-32k", "openai-compatible").contextWindow).toBe(32768);
+    expect(inferModelMeta("claude-sonnet-4-5", "anthropic").contextWindow).toBe(200000);
+    expect(inferModelMeta("gemini-2.5-flash", "gemini").contextWindow).toBe(1000000);
   });
 });
