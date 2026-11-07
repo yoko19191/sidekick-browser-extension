@@ -36,10 +36,15 @@ describe("parseTranslationResponse", () => {
 });
 
 describe("shouldTranslate / prompt", () => {
-  it("skips numbers, urls, and text already in Chinese", () => {
+  it("skips numbers, urls, and text already in the target script", () => {
     expect(shouldTranslate("12,345.6 %", "zh-CN")).toBe(false);
     expect(shouldTranslate("https://example.com/a", "zh-CN")).toBe(false);
     expect(shouldTranslate("这是一段中文内容", "zh-CN")).toBe(false);
+    expect(shouldTranslate("東京の屋上庭園は都市を冷やす", "zh-CN")).toBe(true); // Japanese kanji+kana should still translate into Chinese
+    expect(shouldTranslate("東京の屋上庭園は都市を冷やす", "ja")).toBe(false);
+    expect(shouldTranslate("옥상 정원은 도시를 시원하게 합니다", "ko")).toBe(false);
+    expect(shouldTranslate("Привет мир", "ru")).toBe(false);
+    expect(shouldTranslate("مرحبا بالعالم", "ar")).toBe(false);
     expect(shouldTranslate("Hello world", "zh-CN")).toBe(true);
   });
   it("marks page text as untrusted and asks for a same-length array", () => {

@@ -37,10 +37,29 @@ export function shouldTranslate(text: string, targetLang: string): boolean {
   if (!/\p{L}/u.test(t)) return false;
   if (/^(https?:\/\/|www\.)\S+$/i.test(t)) return false;
   if (/^[\d\s.,:;%+\-–—/()#@]+$/.test(t)) return false;
+  const letters = (t.match(/\p{L}/gu) ?? []).length;
+  if (!letters) return false;
   if (targetLang.startsWith("zh")) {
+    const kana = (t.match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu) ?? []).length;
     const han = (t.match(/\p{Script=Han}/gu) ?? []).length;
-    const letters = (t.match(/\p{L}/gu) ?? []).length;
-    if (letters && han / letters > 0.5) return false; // already mostly Chinese
+    if (kana === 0 && han / letters > 0.5) return false; // already mostly Chinese (without Japanese kana)
+  }
+  if (targetLang === "ja") {
+    const kana = (t.match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu) ?? []).length;
+    const han = (t.match(/\p{Script=Han}/gu) ?? []).length;
+    if (kana > 0 && (kana + han) / letters > 0.5) return false; // already Japanese
+  }
+  if (targetLang === "ko") {
+    const hangul = (t.match(/\p{Script=Hangul}/gu) ?? []).length;
+    if (hangul / letters > 0.5) return false; // already Korean
+  }
+  if (targetLang === "ru") {
+    const cyrillic = (t.match(/\p{Script=Cyrillic}/gu) ?? []).length;
+    if (cyrillic / letters > 0.5) return false; // already Russian
+  }
+  if (targetLang === "ar") {
+    const arabic = (t.match(/\p{Script=Arabic}/gu) ?? []).length;
+    if (arabic / letters > 0.5) return false; // already Arabic
   }
   if (targetLang === "en" && !/[^\x00-\x7F]/.test(t) && /\b(the|and|of|to|is)\b/i.test(t)) return false;
   return true;

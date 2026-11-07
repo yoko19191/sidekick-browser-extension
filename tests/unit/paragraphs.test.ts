@@ -42,6 +42,20 @@ describe("insert / restore", () => {
     expect(restoreOriginal(document)).toBe(1);
     expect(body.innerHTML).toBe(before);
   });
+
+  it("preserves inline links inside .pp-links for translation-only mode and restores cleanly", () => {
+    const body = dom(`<p id="p">Read the <a href="https://example.com/docs" target="_blank">documentation</a> and <a href="javascript:alert(1)">bad</a>.</p>`);
+    const before = body.innerHTML;
+    const p = document.getElementById("p")!;
+    const wrap = insertTranslation(p, "阅读文档。", { lang: "zh-CN", style: "green" });
+    const links = wrap.querySelectorAll(".pp-links a.pp-link");
+    expect(links.length).toBe(1);
+    expect(links[0].getAttribute("href")).toBe("https://example.com/docs");
+    expect(links[0].getAttribute("target")).toBe("_blank");
+    expect(links[0].textContent).toBe("↗ documentation");
+    expect(restoreOriginal(document)).toBe(1);
+    expect(body.innerHTML).toBe(before);
+  });
 });
 
 describe("translation tone", () => {

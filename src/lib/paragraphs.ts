@@ -96,6 +96,33 @@ export function insertTranslation(el: Element, translation: string, opts: { lang
   inner.className = "pp-trans-inner";
   inner.textContent = translation;
   wrap.appendChild(inner);
+  if (el.tagName !== "A") {
+    const anchors = Array.from(el.querySelectorAll("a[href]")).filter((a) => {
+      if (a.closest(".pp-trans,[data-pp-ui]")) return false;
+      const href = a.getAttribute("href")?.trim() ?? "";
+      return href.length > 0 && !/^javascript:/i.test(href);
+    });
+    if (anchors.length > 0) {
+      const links = doc.createElement("span");
+      links.className = "pp-links";
+      const seenHref = new Set<string>();
+      for (const a of anchors) {
+        const href = a.getAttribute("href")!.trim();
+        if (seenHref.has(href)) continue;
+        seenHref.add(href);
+        const link = doc.createElement("a");
+        link.className = "pp-link";
+        link.setAttribute("href", href);
+        const target = a.getAttribute("target");
+        if (target) link.setAttribute("target", target);
+        link.setAttribute("rel", "noopener noreferrer");
+        const label = (a.textContent ?? "").replace(/\s+/g, " ").trim();
+        link.textContent = label ? `↗ ${label}` : "↗";
+        links.appendChild(link);
+      }
+      if (links.childNodes.length > 0) wrap.appendChild(links);
+    }
+  }
   el.appendChild(wrap);
   el.setAttribute("data-pp-done", "");
   return wrap;
@@ -136,7 +163,11 @@ html.pp-only .pp-style-green{color:inherit}
 @keyframes pp-spin{to{transform:rotate(360deg)}}
 html.pp-only [data-pp-done]{font-size:0!important}
 html.pp-only [data-pp-done]>.pp-trans{font-size:var(--pp-fs,16px)!important;margin:0}
-html.pp-only [data-pp-done]>:is(a,span,b,strong,em,i,u,small,sup,sub,mark,abbr,cite,q,time,font,s,del,ins,label,br,img):not(.pp-trans){display:none!important}
+html.pp-only [data-pp-done]>:is(a,span,b,strong,em,i,u,small,sup,sub,mark,abbr,cite,q,time,font,s,del,ins,label,br):not(.pp-trans){display:none!important}
+.pp-links{display:none}
+html.pp-only .pp-links{display:inline-flex;flex-wrap:wrap;gap:.35em;margin-left:.45em;font-size:.88em;vertical-align:baseline}
+html.pp-only .pp-link{color:inherit;text-decoration:underline;opacity:.85}
+html.pp-only .pp-link:hover{opacity:1}
 .pp-failed .pp-retry{all:unset;cursor:pointer;font:500 12px/1.6 system-ui,sans-serif;color:#e11d48;border:1px solid rgba(225,29,72,.3);border-radius:8px;padding:0 8px}
 .pp-flash{outline:2px solid rgba(79,70,229,.55)!important;outline-offset:3px;border-radius:4px;background:rgba(99,102,241,.10)!important;transition:background .3s}
 `;
