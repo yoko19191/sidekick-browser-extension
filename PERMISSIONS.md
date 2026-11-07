@@ -21,6 +21,15 @@
 | `optional_permissions: userScripts` | 第一次在“脚本”页启用或安装用户脚本时申请；Chrome 138+ 还需用户在扩展详情页打开“允许用户脚本”开关 | 运行用户安装或 AI 生成的油猴式脚本（`chrome.userScripts`），脚本在隔离的 USER_SCRIPT 环境里执行 |
 | 模型 API 的 origin（同样落在 `<all_urls>` 的可选范围内） | 添加 / 测试 Provider 时申请该 API 的 origin | 让后台 Service Worker 可以跨域调用你的模型服务（多数服务商本身支持 CORS，拒绝也能用） |
 
+## 本地 PDF（`file://`）
+
+读取本地 PDF 不新增任何 manifest 权限，但需要用户自己完成两步（侧栏会提示并给出按钮）：
+
+1. 在扩展详情页打开 Chrome 的「允许访问文件网址」开关（侧栏「去打开」按钮直达 `chrome://extensions/?id=…`）。切换后 Chrome 会重新加载扩展，需要重新打开侧栏。
+2. 运行时申请 `file:///*` 主机权限（落在已有的 `optional_host_permissions: <all_urls>` 范围内），侧栏用它直接读取文件内容。页面里的脚本读不了 `file://`，所以这一步无法省略。
+
+在线 PDF 只需要 activeTab：字节由注入 PDF 标签页的内容脚本同源读取。
+
 ## 不申请的
 
 - `tabs`：只在已获授权的标签页上读取 URL，不需要。
@@ -29,4 +38,4 @@
 
 ## 关于 E2E 构建
 
-`npm run build:e2e`（`SIDEKICK_E2E=1`）会额外加一条 `host_permissions: ["http://127.0.0.1/*"]`，只因 Playwright 无法点击 Chrome 的权限弹窗。输出到 `.output-e2e/`，**不能用于发布**；正式构建 `npm run build` / `npm run zip` 不包含它。
+`npm run build:e2e`（`SIDEKICK_E2E=1`）会额外加 `host_permissions: ["http://127.0.0.1/*", "file:///*"]`（后者用于本地 PDF 用例），只因 Playwright 无法点击 Chrome 的权限弹窗。输出到 `.output-e2e/`，**不能用于发布**；正式构建 `npm run build` / `npm run zip` 不包含它。

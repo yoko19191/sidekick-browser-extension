@@ -2,7 +2,7 @@ import { TranslationCache } from "@/src/lib/cache";
 import { buildTranslatePrompt, parseTranslationResponse } from "@/src/lib/batch";
 import { promptVariant, translationCacheKey } from "@/src/lib/hash";
 import { listModels, streamText, testConnection } from "@/src/lib/llm";
-import { LONG_PAGE_CHARS, pageSystemPrompt, planLongSummary, sectionPrompt, summaryInstruction } from "@/src/lib/prompts";
+import { LONG_PAGE_CHARS, mapConcurrent, pageSystemPrompt, planChatExcerpts, planLongSummary, sectionPrompt, SUMMARY_CONCURRENCY, summaryInstruction } from "@/src/lib/prompts";
 import { friendlyError, getKey, keyOptional, loadProviders, redactSecrets, resolveModelRef } from "@/src/lib/providers";
 import { langName, loadSettings } from "@/src/lib/settings";
 import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib/types";
@@ -70,10 +70,22 @@ export default defineBackground({
       await chrome.tabs.sendMessage(tabId, { type: "pp:config", settings: s.translation }).catch(() => {});
     }
 
+    const translateInflight = new Map<number, Set<AbortController>>();
+    function abortTabTranslations(tabId: number) {
+      const set = translateInflight.get(tabId);
+      if (!set) return;
+      set.forEach((ac) => ac.abort());
+      translateInflight.delete(tabId);
+    }
+    chrome.tabs.onRemoved?.addListener((tabId) => abortTabTranslations(tabId));
+
     async function toggleTranslate(tabId: number, force?: boolean) {
       await ensureContentScript(tabId);
       const settings = await loadSettings();
-      return chrome.tabs.sendMessage(tabId, { type: "translate:toggle", force, settings: settings.translation });
+      const r = await chrome.tabs.sendMessage(tabId, { type: "translate:toggle", force, settings: settings.translation });
+      if (r?.error) throw new Error(r.error); // e.g. the tab shows a PDF
+      if (!r?.active) abortTabTranslations(tabId);
+      return r;
     }
 
     // Live-apply quick settings (display mode, floating button…) to tabs that already have the script.
@@ -104,35 +116,46 @@ export default defineBackground({
     });
 
     // ---- translation ----
-    async function translateBatch(texts: string[]): Promise<string[]> {
-      const s = await loadSettings();
-      const t = s.translation;
-      const { provider, modelId, apiKey } = await resolveTask(s.models.translate);
-      cache.maxEntries = s.cache.maxEntries;
-      const modelTag = `${provider.presetId}:${modelId}`;
-      // Cache variant = hash of the FULL extra prompt (two prompts sharing a 64-char prefix must not share entries).
-      const variant = await promptVariant(t.extraPrompt);
-      const keys = await Promise.all(texts.map((x) => translationCacheKey(x, t.targetLang, modelTag, variant)));
-      const cached = t.cacheEnabled ? await cache.getMany(keys) : texts.map(() => undefined);
-      const missIdx = cached.map((c, i) => (c === undefined ? i : -1)).filter((i) => i >= 0);
-      const out = cached.slice() as (string | undefined)[];
-      const run = async (idx: number[]): Promise<void> => {
-        if (!idx.length) return;
-        const prompt = buildTranslatePrompt(idx.map((i) => texts[i]), langName(t.targetLang), t.extraPrompt);
-        const r = await streamText({ provider, modelId, apiKey, system: prompt.system, messages: [{ role: "user", content: prompt.user }], temperature: 0.2, maxTokens: 8192 });
-        const parsed = parseTranslationResponse(r.text, idx.length);
-        if (!parsed) {
-          if (idx.length === 1) throw new Error(tr("err.unparsable"));
-          const mid = Math.ceil(idx.length / 2);
-          await run(idx.slice(0, mid));
-          await run(idx.slice(mid));
-          return;
-        }
-        idx.forEach((i, j) => (out[i] = parsed[j]));
-        if (t.cacheEnabled) await cache.putMany(idx.map((i, j) => ({ key: keys[i], translation: parsed[j] })));
-      };
-      await run(missIdx);
-      return out.map((x) => x ?? "");
+    async function translateBatch(texts: string[], tabId?: number): Promise<string[]> {
+      const ac = new AbortController();
+      if (tabId != null) {
+        let set = translateInflight.get(tabId);
+        if (!set) translateInflight.set(tabId, (set = new Set()));
+        set.add(ac);
+      }
+      try {
+        const s = await loadSettings();
+        const t = s.translation;
+        const { provider, modelId, apiKey } = await resolveTask(s.models.translate);
+        cache.maxEntries = s.cache.maxEntries;
+        const modelTag = `${provider.presetId}:${modelId}`;
+        // Cache variant = hash of the FULL extra prompt (two prompts sharing a 64-char prefix must not share entries).
+        const variant = await promptVariant(t.extraPrompt);
+        const keys = await Promise.all(texts.map((x) => translationCacheKey(x, t.targetLang, modelTag, variant)));
+        const cached = t.cacheEnabled ? await cache.getMany(keys) : texts.map(() => undefined);
+        const missIdx = cached.map((c, i) => (c === undefined ? i : -1)).filter((i) => i >= 0);
+        const out = cached.slice() as (string | undefined)[];
+        const run = async (idx: number[]): Promise<void> => {
+          if (!idx.length) return;
+          if (ac.signal.aborted) throw new DOMException("aborted", "AbortError");
+          const prompt = buildTranslatePrompt(idx.map((i) => texts[i]), langName(t.targetLang), t.extraPrompt);
+          const r = await streamText({ provider, modelId, apiKey, signal: ac.signal, system: prompt.system, messages: [{ role: "user", content: prompt.user }], temperature: 0.2, maxTokens: 8192 });
+          const parsed = parseTranslationResponse(r.text, idx.length);
+          if (!parsed) {
+            if (idx.length === 1) throw new Error(tr("err.unparsable"));
+            const mid = Math.ceil(idx.length / 2);
+            await run(idx.slice(0, mid));
+            await run(idx.slice(mid));
+            return;
+          }
+          idx.forEach((i, j) => (out[i] = parsed[j]));
+          if (t.cacheEnabled) await cache.putMany(idx.map((i, j) => ({ key: keys[i], translation: parsed[j] })));
+        };
+        await run(missIdx);
+        return out.map((x) => x ?? "");
+      } finally {
+        if (tabId != null) translateInflight.get(tabId)?.delete(ac);
+      }
     }
 
     async function translateSelection(text: string): Promise<{ translation: string; model: string }> {
@@ -185,7 +208,10 @@ export default defineBackground({
       // ---- from our content script (only text in / text out; never keys or provider config) ----
       switch (msg?.type) {
         case "translate:batch":
-          return reply(translateBatch((msg.texts as string[]).map(String)));
+          return reply(translateBatch((msg.texts as string[]).map(String), tabId));
+        case "translate:abort":
+          if (tabId != null) abortTabTranslations(tabId);
+          return reply(Promise.resolve({ ok: true }));
         case "translate:selection":
           return reply(translateSelection(String(msg.text ?? "")));
         case "translate:self-toggle":
@@ -224,6 +250,9 @@ export default defineBackground({
           return reply(chrome.tabs.sendMessage(msg.tabId, { type: "translate:status" }).catch(() => ({ active: false, total: 0, done: 0, errors: 0 })));
         case "page:extract":
           return reply((async () => (await ensureContentScript(msg.tabId), chrome.tabs.sendMessage(msg.tabId, { type: "page:extract" })))());
+        case "pdf:read":
+          // the PDF tab's content script was injected by the page:extract that found the PDF
+          return reply(chrome.tabs.sendMessage(msg.tabId, { type: "pdf:read", offset: Number(msg.offset) || 0 }));
         case "page:locate":
           return reply((async () => (await ensureContentScript(msg.tabId), chrome.tabs.sendMessage(msg.tabId, { type: "page:locate", text: msg.text })))());
         case "page:selection":
@@ -307,27 +336,37 @@ export default defineBackground({
 
           // Long pages (>20k chars): summarize section by section, then merge (map-reduce).
           let sectionNotes: string | undefined;
+          let excerpts: string | undefined;
           if (req.task === "summary" && req.page && req.page.markdown.length > LONG_PAGE_CHARS) {
             const plan = planLongSummary(req.page.markdown, { fullLength: req.page.length });
             const chunks = plan.chunks;
             if (plan.truncated) send({ type: "coverage", id: req.id, percent: plan.percent });
-            const notes: string[] = [];
-            for (let i = 0; i < chunks.length; i++) {
-              send({ type: "progress", id: req.id, done: i, total: chunks.length });
-              const n = await streamText({ ...base, maxTokens: 1200, system: sectionPrompt(i, chunks.length), messages: [{ role: "user", content: chunks[i] }] });
-              notes.push(`## Section ${i + 1}\n${n.text.trim()}`);
-            }
-            send({ type: "progress", id: req.id, done: chunks.length, total: chunks.length });
+            const notes = await mapConcurrent(
+              chunks,
+              SUMMARY_CONCURRENCY,
+              async (chunk, i) => {
+                const n = await streamText({ ...base, maxTokens: 1200, system: sectionPrompt(i, chunks.length), messages: [{ role: "user", content: chunk }] });
+                return `## Section ${i + 1}\n${n.text.trim()}`;
+              },
+              {
+                signal: ac.signal,
+                onProgress: (done, total) => send({ type: "progress", id: req.id, done, total }),
+              },
+            );
             sectionNotes = notes.join("\n\n");
           } else if (req.page) {
-            // single-pass prompt: pageSystemPrompt keeps only the first maxContextChars characters
+            // Long page, chat: answer from the passages that match the question rather than from the head only.
+            const plan = req.task === "chat" ? planChatExcerpts(req.page.markdown, messages, s.summary.maxContextChars, req.page.length) : undefined;
+            excerpts = plan?.excerpts;
             const full = Math.max(req.page.length ?? 0, req.page.markdown.length);
+            // single-pass prompt otherwise: pageSystemPrompt keeps only the first maxContextChars characters
             const used = Math.min(req.page.markdown.length, s.summary.maxContextChars);
-            if (full > used) send({ type: "coverage", id: req.id, percent: Math.max(1, Math.min(99, Math.floor((used / full) * 100))) });
+            if (plan) send({ type: "coverage", id: req.id, percent: plan.percent, retrieved: true });
+            else if (full > used) send({ type: "coverage", id: req.id, percent: Math.max(1, Math.min(99, Math.floor((used / full) * 100))) });
           }
           let thinkingSent = false;
           const res = await streamText(
-            { ...base, system: pageSystemPrompt(s, req.task, req.page, { sectionNotes }), messages },
+            { ...base, system: pageSystemPrompt(s, req.task, req.page, { sectionNotes, excerpts }), messages },
             {
               onDelta: (text) => send({ type: "delta", id: req.id, text }),
               onThinking: () => {

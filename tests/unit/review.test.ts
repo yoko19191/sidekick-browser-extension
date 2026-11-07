@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeClosingTag, MAX_SECTIONS, pageSystemPrompt, planLongSummary, SECTION_CHARS } from "../../src/lib/prompts";
+import { escapeClosingTag, mapConcurrent, MAX_SECTIONS, pageSystemPrompt, planLongSummary, SECTION_CHARS } from "../../src/lib/prompts";
 import { promptVariant, translationCacheKey } from "../../src/lib/hash";
 import { defaultSettings } from "../../src/lib/settings";
 
@@ -44,5 +44,30 @@ describe("translation cache key", () => {
     expect(a).not.toBe(b);
     expect(await promptVariant("   ")).toBe("");
     expect(await translationCacheKey("hi", "zh-CN", "m", a)).not.toBe(await translationCacheKey("hi", "zh-CN", "m", b));
+  });
+});
+
+describe("mapConcurrent (bounded concurrency for section summaries)", () => {
+  it("respects concurrency limit, preserves order, and reports progress", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const progress: [number, number][] = [];
+    const items = [30, 10, 20, 5, 15];
+    const out = await mapConcurrent(
+      items,
+      2,
+      async (ms, idx) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, ms));
+        active--;
+        return `sec-${idx}`;
+      },
+      { onProgress: (done, total) => progress.push([done, total]) },
+    );
+    expect(maxActive).toBeLessThanOrEqual(2);
+    expect(out).toEqual(["sec-0", "sec-1", "sec-2", "sec-3", "sec-4"]);
+    expect(progress[0]).toEqual([0, 5]);
+    expect(progress[progress.length - 1]).toEqual([5, 5]);
   });
 });

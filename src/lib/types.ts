@@ -69,7 +69,7 @@ export type PortRequest =
       id: string;
       task: "chat" | "summary";
       messages: ChatTurn[];
-      page?: { title: string; url: string; markdown: string; lang?: string; length?: number };
+      page?: { title: string; url: string; markdown: string; lang?: string; length?: number; kind?: "pdf" };
     }
   | { type: "abort"; id: string }
   | { type: "ping" };
@@ -79,12 +79,17 @@ export type PortEvent =
   | { type: "delta"; id: string; text: string }
   | { type: "thinking"; id: string }
   | { type: "progress"; id: string; done: number; total: number }
-  | { type: "coverage"; id: string; percent: number }
+  /** The answer used only part of a long page: its first `percent` %, or (retrieved) excerpts adding up to it. */
+  | { type: "coverage"; id: string; percent: number; retrieved?: boolean }
   | { type: "done"; id: string; stopReason?: string }
   | { type: "error"; id: string; message: string }
   | { type: "pong"; bootId: string };
 
 export interface PageContent {
+  /** Absent = an HTML page (Readability). "pdf" = text layer of a PDF, one `## Page N` section per page. */
+  kind?: "pdf";
+  /** PDF page count. */
+  pages?: number;
   title: string;
   url: string;
   markdown: string;

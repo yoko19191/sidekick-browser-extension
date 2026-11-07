@@ -4,6 +4,7 @@
 //   anything else: a Markdown summary streamed in small chunks
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
+import { makePdf } from "./make-pdf.mjs";
 
 const FIXTURE_DIR = new URL("./", import.meta.url);
 export const stats = { translateRequests: 0, translatedItems: 0, chatRequests: 0, sectionRequests: 0, selectionRequests: 0, toolRequests: 0, pixelHits: 0, authHeaders: new Set() };
@@ -54,6 +55,19 @@ export function mockTranslate(text) {
   return (FILLER.repeat(Math.ceil(n / FILLER.length) + 1)).slice(0, n).replace(/[，、]$/, "") + "。";
 }
 
+/** Known fact for PDF tests, on the second-to-last page so a head-only context would miss it on long reports. */
+export const PDF_FACT = "The pilot project in Tallinn saved 4127 kWh in its first winter.";
+const PDF_FILLER = "Green roofs reduce runoff and keep buildings cooler during summer heat waves across many climates.";
+/** `pages` pages of filler text, PDF_FACT on page pages-1; `text=0` gives a scanned-like PDF with no text layer. */
+function reportPdf(pages = 3, withText = true) {
+  return makePdf(
+    Array.from({ length: pages }, (_, i) =>
+      !withText ? [] : [`Report section ${i + 1}`, ...Array.from({ length: 8 }, () => PDF_FILLER), ...(i === pages - 2 ? [PDF_FACT] : [])],
+    ),
+    { title: "Green Roof Report" },
+  );
+}
+
 function longArticle(chapters = 70) {
   const paras = Array.from({ length: chapters }, (_, i) => `<h2>Chapter ${i + 1}</h2><p>${`Section ${i + 1} discusses urban heat, rainfall retention and pollinators in considerable detail. `.repeat(5)}</p>`).join("\n");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A Very Long Report on Green Roofs</title></head><body><article><h1>A Very Long Report on Green Roofs</h1>${paras}</article></body></html>`;
@@ -94,6 +108,10 @@ export function startMock(port = 0) {
     if (url.pathname === "/fixtures/long.html") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(longArticle(Math.min(2000, Number(url.searchParams.get("chapters")) || 70)));
+    }
+    if (url.pathname === "/fixtures/report.pdf" || url.pathname === "/fixtures/report") {
+      res.writeHead(200, { "Content-Type": "application/pdf" });
+      return res.end(reportPdf(Math.min(400, Number(url.searchParams.get("pages")) || 3), url.searchParams.get("text") !== "0"));
     }
     if (url.pathname.startsWith("/fixtures/")) {
       try {
@@ -183,6 +201,7 @@ export function startMock(port = 0) {
         return out.end(model);
       }
       stats.chatRequests++;
+      stats.lastChatSystem = sysText;
       if (model === "mock-slow") {
         out.chunk(model, "Start. ");
         await sleep(32000); // silent gap longer than the 30s SW idle timeout
@@ -197,6 +216,10 @@ export function startMock(port = 0) {
         // simulates a prompt-injected model trying to exfiltrate via an auto-loading image (+ raw HTML)
         const host = `http://${req.headers.host}`;
         out.chunk(model, `Sure. ![status](${host}/__pixel?d=secret-from-page) and <img src="${host}/__pixel?d=html"> done.`);
+        return out.end(model);
+      }
+      if (/CITE-PDF/.test(lastText)) {
+        out.chunk(model, `The pilot saved energy.[^1]\n\n[^1]: ${PDF_FACT.slice(0, 50)}`);
         return out.end(model);
       }
       if (/Reply with: ok/.test(lastText)) {

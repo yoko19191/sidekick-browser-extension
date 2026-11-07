@@ -1,10 +1,11 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 import TurndownService from "turndown";
+import { MAX_DOC_CHARS } from "./retrieve";
 import type { PageContent } from "./types";
 
 /** Extract the main content of the current document as Markdown (Readability on a clone, then Turndown). */
 /** `length` is the FULL extracted length, before the `maxChars` cap, so callers can tell how much was cut. */
-export function extractPage(doc: Document = document, maxChars = 200000): PageContent {
+export function extractPage(doc: Document = document, maxChars = MAX_DOC_CHARS): PageContent {
   const url = doc.location?.href ?? "";
   const clone = doc.cloneNode(true) as Document;
   clone.querySelectorAll(".pp-trans, [data-pp-ui]").forEach((n) => n.remove());

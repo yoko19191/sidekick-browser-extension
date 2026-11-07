@@ -12,6 +12,8 @@ import type { ChatTurn, DisplayMode, PageContent, ProviderConfig, Settings, Tran
 import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, Popover, PopoverContent, PopoverTrigger, Segmented, Select, Switch, useToast } from "./components/ui";
 import { Mascot, type MascotState } from "./mascot/Mascot";
 import { useActiveTab, type TabInfo } from "./hooks";
+import { pageErrorOf, restrictedUrl as restricted, usePageContent } from "./usePageContent";
+import { isFileUrl } from "@/src/lib/pdf/bytes";
 import { bg, llm } from "./messaging";
 import { tr } from "@/src/i18n";
 
@@ -22,11 +24,14 @@ interface Msg extends ChatTurn {
   model?: string;
   error?: string;
   progress?: { done: number; total: number };
+  /** PDF pages read so far, while the PDF is being parsed for this answer. */
+  pdfProgress?: { done: number; total: number };
   coverage?: number; // % of a very long page that the summary covers (only set when truncated)
+  /** true: chat on a long page answered from retrieved excerpts (coverage = their share); false: from the head. */
+  retrieved?: boolean;
 }
 
 const store = new ConversationStore();
-const restricted = (url: string) => !/^https?:|^file:/.test(url) || /^https:\/\/(chrome\.google\.com\/webstore|chromewebstore\.google\.com)/.test(url);
 const newId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 export function ChatView({ settings, update, providers, masked, onSetup }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ProviderConfig[]; masked: Record<string, string>; onSetup: () => void }) {
@@ -43,7 +48,11 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   const [input, setInput] = useState("");
   const [usePage, setUsePage] = useState(true);
   const [busy, setBusy] = useState<{ abort: () => void } | null>(null);
-  const [pageError, setPageError] = useState<string | null>(null);
+  const page = usePageContent(tab);
+  const pageError = page.error;
+  const setPageError = (text: string | null) => page.setError(text === null ? null : { text });
+  /** A failed page call: permission-shaped errors get the matching fix button. */
+  const failPage = (e: unknown) => page.setError(pageErrorOf(e, tab?.url ?? ""));
   const [tstate, setTstate] = useState<TranslateState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
@@ -55,7 +64,6 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     setFlash(f);
     flashTimer.current = window.setTimeout(() => setFlash(null), 1200);
   }, []);
-  const pageCache = useRef(new Map<string, PageContent>());
   const scroller = useRef<HTMLDivElement>(null);
 
   const usable = (p: ProviderConfig) => !!masked[p.id] || keyOptional(p);
@@ -88,28 +96,6 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     }).catch(() => {});
   }, [messages, conv.id]);
 
-  async function getPage(): Promise<PageContent | undefined> {
-    if (!tab || (tab.url && restricted(tab.url))) return undefined; // url "" = hidden (no access yet), still worth trying
-    const k = `${tab.id}|${tab.url}`;
-    if (pageCache.current.has(k)) return pageCache.current.get(k);
-    try {
-      const p = await bg<PageContent>({ type: "page:extract", tabId: tab.id });
-      pageCache.current.set(k, p);
-      setPageError(null);
-      return p;
-    } catch (e) {
-      setPageError((e as Error).message);
-      return undefined;
-    }
-  }
-
-  async function grantSite() {
-    // Without host access Chrome hides tab.url, so an origin-specific request is only possible when we know it.
-    if (!tab || !/^https?:|^file:/.test(tab.url)) return;
-    const ok = await chrome.permissions.request({ origins: [`${new URL(tab.url).origin}/*`] }).catch(() => false);
-    if (ok) setPageError(null);
-  }
-
   async function send(text: string, kind?: "summary") {
     if (!text.trim() || busy) return;
     if (!configured) return onSetup();
@@ -125,13 +111,26 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     const history = [...messages.filter((m) => m.status !== "error"), user].map(({ role, content }) => ({ role, content }));
     setMessages((m) => [...m, user, asst]);
     setInput("");
-    const page = kind === "summary" || usePage ? await getPage() : undefined;
     const patch = (f: (x: Msg) => Msg) => setMessages((m) => m.map((x) => (x.id === asst.id ? f(x) : x)));
-    if (kind === "summary" && !page) return patch((x) => ({ ...x, status: "error", error: tr("chat.cannotReadPage") }));
-    const h = llm.chat({ task: kind ?? "chat", messages: history, page: page && { title: page.title, url: page.url, markdown: page.markdown, length: page.length } }, (e) => {
+    // Busy from the start: reading a long PDF takes a while, and Stop must cancel it too.
+    const reading = new AbortController();
+    setBusy({ abort: () => reading.abort() });
+    const content = kind === "summary" || usePage
+      ? await page.getPage({ signal: reading.signal, onProgress: (done, total) => patch((x) => ({ ...x, pdfProgress: { done, total } })) })
+      : undefined;
+    patch((x) => ({ ...x, pdfProgress: undefined }));
+    if (reading.signal.aborted) {
+      setBusy(null);
+      return patch((x) => ({ ...x, status: "done" }));
+    }
+    if (kind === "summary" && !content) {
+      setBusy(null);
+      return patch((x) => ({ ...x, status: "error", error: tr("chat.cannotReadPage") }));
+    }
+    const h = llm.chat({ task: kind ?? "chat", messages: history, page: content && { title: content.title, url: content.url, markdown: content.markdown, length: content.length, kind: content.kind } }, (e) => {
       if (e.type === "start") patch((x) => ({ ...x, model: e.model }));
       if (e.type === "progress") patch((x) => ({ ...x, progress: { done: e.done, total: e.total } }));
-      if (e.type === "coverage") patch((x) => ({ ...x, coverage: e.percent }));
+      if (e.type === "coverage") patch((x) => ({ ...x, coverage: e.percent, retrieved: e.retrieved }));
       if (e.type === "thinking") patch((x) => ({ ...x, status: x.content ? x.status : "thinking" }));
       if (e.type === "delta") patch((x) => ({ ...x, status: "streaming", content: x.content + e.text }));
       if (e.type === "done") {
@@ -175,7 +174,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
       setTstate(await bg<TranslateState>({ type: "translate:toggle", tabId: tab.id }));
       setPageError(null);
     } catch (e) {
-      setPageError((e as Error).message);
+      failPage(e);
     }
   }
 
@@ -187,7 +186,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
       setPageError(null);
       return r.text;
     } catch (e) {
-      setPageError((e as Error).message);
+      failPage(e);
       return undefined;
     }
   }
@@ -210,8 +209,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   async function locate(text: string) {
     if (!tab) return;
     try {
-      const r = await bg<{ found: boolean }>({ type: "page:locate", tabId: tab.id, text });
-      if (!r.found) toast({ text: tr("chat.citationNotFound"), tone: "info" });
+      if (!(await page.locate(text))) toast({ text: tr("chat.citationNotFound"), tone: "info" });
     } catch (e) {
       toast({ text: (e as Error).message, tone: "error" });
     }
@@ -221,8 +219,10 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   // Without host access (or after an activeTab grant expired) Chrome hides tab.url: the page is still usable once
   // granted, so actions stay enabled and fail into the "grant" strip instead of looking like a browser-internal page.
   const urlHidden = !!tab && !tab.url;
-  const pageOk = !!host || urlHidden;
-  const needsGrant = !!pageError && /permission|Cannot access|must request/i.test(pageError);
+  const local = !!tab && isFileUrl(tab.url);
+  const pageOk = !!host || urlHidden || local;
+  const pageLabel = host || (local ? tr("chat.localFile") : "");
+  const needsGrant = !!pageError?.fix;
   const translating = !!tstate?.active;
   const allModels = providers.filter((p) => p.enabled && usable(p)).map((p) => ({ p, models: p.models }));
 
@@ -264,11 +264,11 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {messages.length === 0 ? (
-          <Home mood={mood} tab={tab} host={host} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
+          <Home mood={mood} tab={tab} host={pageLabel} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
             onExplain={explainSelection} onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
         ) : (
           <>
-            {pageOk && <PageChip tab={tab} host={host} className="mt-1 bg-card" />}
+            {pageOk && <PageChip tab={tab} host={pageLabel} className="mt-1 bg-card" />}
             <div className="space-y-5 pt-4">
               {messages.map((m, i) => (
                 <MessageItem key={m.id} m={m} mood={i === messages.length - 1 ? chatMood : undefined} onRetry={() => send(messages[i - 1]?.content ?? "", m.kind)} onLocate={locate} />
@@ -291,9 +291,11 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
           <div data-testid="page-error" data-needs-grant={needsGrant ? "" : undefined} className="flex animate-in items-center gap-2 rounded-card bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-800 dark:text-amber-200">
             <Lock className="size-4 shrink-0" />
             <span className="min-w-0 flex-1">
-              {!needsGrant ? pageError : host ? tr("chat.needHost", { host: host }) : tr("chat.needAccessClickIcon")}
+              {pageError.fix !== "grant-site" ? pageError.text : host ? tr("chat.needHost", { host: host }) : tr("chat.needAccessClickIcon")}
             </span>
-            {needsGrant && host && <Button size="sm" variant="outline" onClick={grantSite} testId="grant-site">{tr("chat.allow")}</Button>}
+            {pageError.fix === "file-access" && <Button size="sm" variant="outline" onClick={page.fix} testId="open-file-access">{tr("chat.openExtSettings")}</Button>}
+            {pageError.fix === "grant-file" && <Button size="sm" variant="outline" onClick={page.fix} testId="grant-file">{tr("chat.allow")}</Button>}
+            {pageError.fix === "grant-site" && host && <Button size="sm" variant="outline" onClick={page.fix} testId="grant-site">{tr("chat.allow")}</Button>}
             <button onClick={() => setPageError(null)} className="opacity-60 hover:opacity-100" aria-label={tr("common.close")}><X className="size-4" /></button>
           </div>
         )}
@@ -350,7 +352,11 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
                     <DropdownLabel>{p.name}</DropdownLabel>
                     {models.map((m) => (
                       <DropdownItem key={m} testId={`model-option-${m}`} checked={chatModel?.provider.id === p.id && chatModel.modelId === m}
-                        onSelect={() => update((s) => ({ ...s, models: { ...s.models, chat: modelRef(p.id, m), summary: modelRef(p.id, m) } }))}>
+                        onSelect={() => update((s) => {
+                          const nextRef = modelRef(p.id, m);
+                          const syncSummary = s.models.summary === "auto" || s.models.summary === s.models.chat;
+                          return { ...s, models: { ...s.models, chat: nextRef, summary: syncSummary ? nextRef : s.models.summary } };
+                        })}>
                         {m}
                       </DropdownItem>
                     ))}
@@ -525,7 +531,8 @@ function MessageItem({ m, mood, onRetry, onLocate }: { m: Msg; mood?: MascotStat
       ) : !m.content ? (
         <div className="flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
           <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: `${i * 120}ms` }} />)}</span>
-          {m.progress && m.progress.total > 1 ? tr("chat.readingSections", { done: m.progress.done, total: m.progress.total }) : m.status === "thinking" ? tr("chat.thinking") : m.kind === "summary" ? tr("chat.readingPage") : ""}
+          {m.pdfProgress ? tr("chat.readingPdf", { done: m.pdfProgress.done, total: m.pdfProgress.total })
+            : m.progress && m.progress.total > 1 ? tr("chat.readingSections", { done: m.progress.done, total: m.progress.total }) : m.status === "thinking" ? tr("chat.thinking") : m.kind === "summary" ? tr("chat.readingPage") : ""}
         </div>
       ) : (
         <div ref={ref} onClick={onClick} className={cn("md", m.status === "streaming" && "caret")} data-testid="assistant-content">
@@ -535,7 +542,7 @@ function MessageItem({ m, mood, onRetry, onLocate }: { m: Msg; mood?: MascotStat
       {m.coverage != null && (
         <div data-testid="coverage-notice" className="mt-2 flex items-center gap-1.5 rounded-[10px] bg-muted px-2.5 py-1.5 text-[12px] text-muted-foreground">
           <Info className="size-3.5 shrink-0" />
-          {m.kind === "summary" ? tr("chat.coverageSummary", { percent: m.coverage }) : tr("chat.coverageChat", { percent: m.coverage })}
+          {m.kind === "summary" ? tr("chat.coverageSummary", { percent: m.coverage }) : m.retrieved ? tr("chat.coverageRetrieved", { percent: m.coverage }) : tr("chat.coverageChat", { percent: m.coverage })}
         </div>
       )}
       {m.status === "done" && (

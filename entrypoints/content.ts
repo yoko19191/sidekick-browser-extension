@@ -6,6 +6,7 @@ import { collectParagraphs, insertTranslation, markPending, restoreOriginal, TRA
 import type { Settings, TranslateState } from "@/src/lib/types";
 import { tr } from "@/src/i18n";
 import { handleAgentMessage } from "@/src/agent/page/content-host";
+import { hostPdfTab, isPdfDocument } from "@/src/lib/pdf/tab-host";
 
 /**
  * Injected on demand (chrome.scripting.executeScript) — never declared in the manifest.
@@ -18,6 +19,7 @@ export default defineContentScript({
     const w = window as unknown as { __sidekick?: boolean };
     if (w.__sidekick) return;
     w.__sidekick = true;
+    if (isPdfDocument()) return hostPdfTab();
 
     type TSettings = Settings["translation"];
     let cfg: TSettings | null = null;
@@ -207,6 +209,7 @@ export default defineContentScript({
       io = mo = null;
       queue = [];
       seen = new WeakSet();
+      chrome.runtime.sendMessage({ type: "translate:abort" }).catch(() => {});
       restoreOriginal(document);
       state = { active: false, total: 0, done: 0, errors: 0 };
       report();

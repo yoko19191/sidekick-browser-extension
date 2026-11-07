@@ -1,6 +1,6 @@
 # 翻翻 Sidekick
 
-浏览器侧栏 AI 助手（Chrome MV3）：**网页双语翻译 · 划词翻译 · 页面总结与问答**。
+浏览器侧栏 AI 助手（Chrome MV3）：**网页双语翻译 · 划词翻译 · 页面与 PDF 总结问答**。
 BYOK（用你自己的 API Key），纯客户端，没有服务器。
 
 - 包名：`sidekick-extension`；扩展名 `翻翻 Sidekick`，short_name `翻翻`（`_locales/zh_CN`、`_locales/en`）
@@ -13,6 +13,8 @@ BYOK（用你自己的 API Key），纯客户端，没有服务器。
 | 模块 | 说明 |
 |---|---|
 | 侧栏对话 | 总结本页（Readability → Markdown，>2 万字自动分段总结再合并）、围绕页面多轮问答、快捷指令（总结 / 翻译 / 提取要点）、历史会话（IndexedDB）、流式 Markdown、可随时停止、脚注引用点击定位原文并高亮 2 秒 |
+| 长文档问答 | 页面（或 PDF）超过上下文预算（默认 4.8 万字）时，按最近两轮提问做本地 BM25 检索，只发送最相关的段落（开头段始终保留），回答下方注明“已按问题检索相关段落（约占全文 x%）”；正文最多读取 100 万字 |
+| PDF 问答 | 在线 PDF 标签页和本地 `file://` PDF：侧栏里用 pdf.js 抽取文字层（按 `## Page N` 分页），总结 / 问答 / 引用都可用，点击引用跳到对应页；扫描件（无文字层）、整页翻译、网页操作会明确提示不支持 |
 | 全文翻译 | 段落级双语对照或仅译文；批量打包请求（JSON 编号返回）；IntersectionObserver 滚到哪翻到哪；MutationObserver 补翻动态内容；IndexedDB 缓存（原文哈希 + 目标语言 + 模型，LRU）；失败段落可“重试”；一键恢复原文 |
 | 划词翻译 | 选中文字出现小图标 → 浮动卡片显示译文 → 复制 / 发到侧栏追问；右键“翻译选中文字” |
 | 入口 | 侧栏按钮、网页右侧悬浮按钮（点击切换翻译，右键/长按打开侧栏）、右键菜单、快捷键 `Alt+A` |
@@ -72,16 +74,18 @@ Options 页                              Content Script（按需注入）：段�
 - 模型请求只从 Service Worker 发出，Key 只在那里读取；内容脚本只发送文本、接收译文。
 - 侧栏与 SW 之间用长连接端口传流式输出；流式进行中侧栏每 15 秒 ping 一次，保证模型长时间“思考”时 SW 也不会因 30 秒空闲被回收（e2e 里有 45 秒、含 32 秒静默的用例）。
 - 网页内容在提示词里用 `<page>` 标签隔离并声明为不可信数据。
+- PDF：Chrome 的 PDF 阅读器在独立进程渲染，页面里拿不到文字，所以由侧栏按需加载 pdf.js（Worker 解析，HTML 页面不加载它）。在线 PDF 的字节由注入 PDF 标签页的内容脚本同源 `fetch` 后分块（base64，每块 4 MB）交给侧栏，activeTab 即可、带用户自己的 cookie；本地 PDF 页面脚本读不了 `file://`，由侧栏直接读取，需要「允许访问文件网址」开关和 `file:///*` 授权（见 PERMISSIONS.md）。PDF 上限 100 MB；中日韩 PDF 需要的 CMap 随扩展打包在 `/pdfjs/cmaps/`。
 
 ## 目录
 
 ```
 entrypoints/   background.ts · content.ts · sidepanel/ · options/
-src/lib/       providers / settings / llm(pi-ai) / batch / cache / db / paragraphs / extract / prompts / page-ui
-src/ui/        App · ChatView · Onboarding · options/OptionsApp · components/ui（shadcn 风格）· mascot/Mascot · dev/MascotGallery（仅 e2e 构建）
+src/lib/       providers / settings / llm(pi-ai) / batch / cache / db / paragraphs / extract / prompts / retrieve（长文档检索）/ page-ui
+src/lib/pdf/   text（pdf.js 文本 → 分页 Markdown）· bytes（取 PDF 字节）· tab-host（PDF 标签页的内容脚本）· load（侧栏里的 pdf.js）
+src/ui/        App · ChatView · usePageContent（读取页面 / PDF、权限修复、引用定位） · Onboarding · options/OptionsApp · components/ui（shadcn 风格）· mascot/Mascot · dev/MascotGallery（仅 e2e 构建）
 assets/mascot/ 设计师的分层吉祥物 SVG
-tests/unit/    vitest：批处理、缓存、Key 处理、设置默认值、段落收集
-tests/e2e/     Playwright：引导、对话、全文翻译、划词翻译、设置层级、长流式
+tests/unit/    vitest：批处理、缓存、Key 处理、设置默认值、段落收集、长文档检索、PDF 文本抽取（真实 pdf.js）
+tests/e2e/     Playwright：引导、对话、全文翻译、划词翻译、设置层级、长流式、PDF（在线 / 本地 / 长 PDF 检索 / 引用跳页 / 扫描件）、长网页检索
 scripts/       check-permissions.mjs · permissions.allowlist.json · make-icons.mjs · screenshots.mjs
 ```
 
