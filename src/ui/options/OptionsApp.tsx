@@ -484,6 +484,13 @@ function DataSection({ update }: Ctx) {
   );
 }
 
+const MCP_TOOL_GROUPS = [
+  { labelKey: "mcp.catInspect" as const, tools: ["browser_snapshot", "browser_screenshot", "browser_extract", "browser_search_page"] },
+  { labelKey: "mcp.catInteract" as const, tools: ["browser_click", "browser_input", "browser_select_option", "browser_scroll", "browser_send_keys"] },
+  { labelKey: "mcp.catTabs" as const, tools: ["browser_tabs_list", "browser_tab_activate", "browser_tab_open", "browser_tab_close", "browser_navigate", "browser_go_back", "browser_wait"] },
+  { labelKey: "mcp.catAgent" as const, tools: ["browser_run_task"] },
+];
+
 function McpBridgeCard() {
   const toast = useToast();
   const [status, setStatus] = useState<McpBridgeStatus>({
@@ -494,6 +501,7 @@ function McpBridgeCard() {
   });
   const [portInput, setPortInput] = useState(String(DEFAULT_MCP_PORT));
   const [tokenInput, setTokenInput] = useState("");
+  const [showJson, setShowJson] = useState(false);
 
   const refresh = async () => {
     try {
@@ -538,10 +546,10 @@ function McpBridgeCard() {
     await bg<McpBridgeStatus>({ type: "mcp:reconnect" }).then((r) => r && setStatus(r));
   };
 
-  const copyMcpJson = () => {
+  const mcpSnippet = () => {
     const args = ["scripts/mcp-server.mjs", `--port=${status.port}`];
     if (status.token) args.push(`--token=${status.token}`);
-    const snippet = JSON.stringify(
+    return JSON.stringify(
       {
         mcpServers: {
           "sidekick-browser": {
@@ -553,52 +561,117 @@ function McpBridgeCard() {
       null,
       2,
     );
-    navigator.clipboard.writeText(snippet);
+  };
+
+  const copyMcpJson = () => {
+    navigator.clipboard.writeText(mcpSnippet());
     toast({ text: tr("mcp.copied"), tone: "info" });
   };
 
   return (
-    <Card data-testid="mcp-bridge-card">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <SectionLabel>{tr("mcp.title")}</SectionLabel>
-          <p className="mt-1 text-[13px] leading-5 text-muted-foreground">{tr("mcp.desc")}</p>
+    <Card className="p-5" data-testid="mcp-bridge-card">
+      {/* Header row: icon + title + status badge | switch */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-primary/10 text-primary">
+            <Zap className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[15px] font-semibold text-foreground">{tr("mcp.title")}</span>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium",
+                  !status.enabled
+                    ? "bg-muted text-muted-foreground"
+                    : status.connected
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                )}
+              >
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    !status.enabled ? "bg-muted-foreground/50" : status.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse",
+                  )}
+                />
+                {!status.enabled ? tr("mcp.badgeDisabled") : status.connected ? tr("mcp.badgeConnected") : tr("mcp.badgeWaiting")}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{tr("mcp.subtitle")}</p>
+          </div>
         </div>
         <Switch testId="mcp-enable" checked={status.enabled} onChange={toggle} label={tr("mcp.enable")} />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-btn bg-muted/50 px-3 py-2 text-[12.5px]">
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            !status.enabled ? "bg-muted-foreground/40" : status.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse",
+      <p className="mt-3 text-[13px] leading-5 text-muted-foreground">{tr("mcp.desc")}</p>
+
+      {/* Live status & actions bar */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-border/60 bg-background/70 px-3.5 py-2.5 text-[12.5px]">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              !status.enabled ? "bg-muted-foreground/40" : status.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse",
+            )}
+          />
+          <span className="truncate font-mono text-[12px] font-medium text-foreground/90" data-testid="mcp-status-text">
+            {!status.enabled
+              ? tr("mcp.statusDisabled")
+              : status.connected
+                ? tr("mcp.statusConnected", { port: status.port })
+                : tr("mcp.statusWaiting", { port: status.port })}
+          </span>
+          {status.lastTool && (
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[11px] font-medium text-primary">
+              {tr("mcp.lastTool", { tool: status.lastTool })}
+            </span>
           )}
-        />
-        <span className="flex-1 font-medium" data-testid="mcp-status-text">
-          {!status.enabled
-            ? tr("mcp.statusDisabled")
-            : status.connected
-              ? tr("mcp.statusConnected", { port: status.port })
-              : tr("mcp.statusWaiting", { port: status.port })}
-        </span>
-        {status.lastTool && <span className="text-[11.5px] text-muted-foreground">{tr("mcp.lastTool", { tool: status.lastTool })}</span>}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="secondary" icon={RefreshCw} onClick={applyConfig} testId="mcp-reconnect">
+            {tr("mcp.reconnect")}
+          </Button>
+          <Button size="sm" variant="outline" onClick={copyMcpJson} testId="mcp-copy-config">
+            {tr("mcp.copyConfig")}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setShowJson((v) => !v)}>
+            {showJson ? tr("mcp.hideConfig") : tr("mcp.showConfig")}
+          </Button>
+        </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      {showJson && (
+        <pre className="mt-2.5 overflow-x-auto rounded-[12px] border border-border/60 bg-background/90 p-3 font-mono text-[11.5px] leading-5 text-foreground/85">
+          {mcpSnippet()}
+        </pre>
+      )}
+
+      {/* Port & Token inputs */}
+      <div className="mt-4 grid grid-cols-2 gap-3">
         <TextField label={tr("mcp.port")} value={portInput} onChange={setPortInput} mono testId="mcp-port" />
         <TextField label={tr("mcp.token")} value={tokenInput} onChange={setTokenInput} placeholder={tr("mcp.tokenPlaceholder")} mono testId="mcp-token" />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="secondary" icon={RefreshCw} onClick={applyConfig} testId="mcp-reconnect">
-          {tr("mcp.reconnect")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={copyMcpJson} testId="mcp-copy-config">
-          {tr("mcp.copyConfig")}
-        </Button>
+      {/* Categorized MCP Tool pills */}
+      <div className="mt-4 rounded-[12px] border border-border/50 bg-background/50 p-3.5">
+        <div className="mb-2.5 text-[12px] font-semibold text-foreground/80">{tr("mcp.toolsTitle")}</div>
+        <div className="space-y-2">
+          {MCP_TOOL_GROUPS.map((g) => (
+            <div key={g.labelKey} className="flex flex-wrap items-center gap-1.5">
+              <span className="w-24 shrink-0 text-[11.5px] font-medium text-muted-foreground">{tr(g.labelKey)}</span>
+              {g.tools.map((t) => (
+                <code
+                  key={t}
+                  className="rounded-md border border-border/70 bg-card px-2 py-0.5 font-mono text-[11px] text-foreground/85"
+                >
+                  {t}
+                </code>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-
-      <p className="mt-3 text-[11.5px] leading-5 text-muted-foreground">{tr("mcp.toolsSummary")}</p>
     </Card>
   );
 }
@@ -641,46 +714,91 @@ function AgentSection() {
     await reload();
   };
   return (
-    <div className="mt-6 space-y-6">
+    <div>
+      <SectionLabel>{tr("mcp.sectionBridge")}</SectionLabel>
       <McpBridgeCard />
-      <Card>
-        <SectionLabel>{tr("agent.neverSites")}</SectionLabel>
-        <p className="mb-3 text-[13px] text-muted-foreground">{tr("agent.neverSitesHelp")}</p>
-        <div className="flex gap-2">
-          <input className={inputCls} placeholder={tr("agent.sitePlaceholder")} value={siteIn} onChange={(e) => setSiteIn(e.target.value)} data-testid="agent-never-input" />
-          <Button onClick={addNever} testId="agent-never-add">{tr("agent.addSite")}</Button>
-        </div>
-        <ul className="mt-3 space-y-1" data-testid="agent-never-list">
-          {neverSites.map((s) => (
-            <li key={s.site} className="flex items-center justify-between rounded-btn bg-muted/50 px-3 py-1.5 text-[13px]">
-              <span>{s.site}</span>
-              <button className="text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "never")}>{tr("agent.remove")}</button>
+
+      <SectionLabel>{tr("mcp.sectionPolicy")}</SectionLabel>
+      <div className="space-y-3">
+        <Card className="p-4">
+          <div className="text-[14px] font-semibold text-foreground">{tr("agent.neverSites")}</div>
+          <p className="mt-0.5 mb-3 text-[12.5px] text-muted-foreground">{tr("agent.neverSitesHelp")}</p>
+          <div className="flex gap-2">
+            <input
+              className={inputCls}
+              placeholder={tr("agent.sitePlaceholder")}
+              value={siteIn}
+              onChange={(e) => setSiteIn(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addNever()}
+              data-testid="agent-never-input"
+            />
+            <Button onClick={addNever} testId="agent-never-add">{tr("agent.addSite")}</Button>
+          </div>
+          <ul className="mt-3 space-y-1.5" data-testid="agent-never-list">
+            {neverSites.length === 0 && (
+              <li className="rounded-btn border border-dashed border-border/70 px-3 py-2 text-center text-[12.5px] text-muted-foreground">
+                {tr("mcp.neverEmpty")}
+              </li>
+            )}
+            {neverSites.map((s) => (
+              <li key={s.site} className="flex items-center justify-between rounded-btn bg-background/70 px-3 py-2 text-[13px]">
+                <span className="font-mono text-[12.5px]">{s.site}</span>
+                <button className="text-[12px] text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "never")}>
+                  {tr("agent.remove")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        <Card className="p-4">
+          <div className="text-[14px] font-semibold text-foreground">{tr("agent.noConfirmSites")}</div>
+          <p className="mt-0.5 mb-3 text-[12.5px] text-muted-foreground">{tr("agent.noConfirmHelp")}</p>
+          <ul className="space-y-1.5" data-testid="agent-allow-list">
+            {allows.length === 0 && (
+              <li className="rounded-btn border border-dashed border-border/70 px-3 py-2 text-center text-[12.5px] text-muted-foreground">
+                {tr("mcp.allowEmpty")}
+              </li>
+            )}
+            {allows.map((s) => (
+              <li key={s.site} className="flex items-center justify-between rounded-btn bg-background/70 px-3 py-2 text-[13px]">
+                <span>
+                  <span className="font-mono text-[12.5px]">{s.site}</span>{" "}
+                  <span className="text-[12px] text-muted-foreground">({s.kinds.join(", ")})</span>
+                </span>
+                <button className="text-[12px] text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "allow")}>
+                  {tr("agent.remove")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </div>
+
+      <SectionLabel>{tr("mcp.sectionHistory")}</SectionLabel>
+      <Card className="p-4">
+        <div className="mb-2.5 text-[14px] font-semibold text-foreground">{tr("agent.history")}</div>
+        <ul className="max-h-80 space-y-2 overflow-y-auto" data-testid="agent-history">
+          {runs.length === 0 && (
+            <li className="rounded-btn border border-dashed border-border/70 px-3 py-4 text-center text-[12.5px] text-muted-foreground">
+              {tr("agent.historyEmpty")}
             </li>
-          ))}
-        </ul>
-      </Card>
-      <Card>
-        <SectionLabel>{tr("agent.noConfirmSites")}</SectionLabel>
-        <p className="mb-3 text-[13px] text-muted-foreground">{tr("agent.noConfirmHelp")}</p>
-        <ul className="space-y-1" data-testid="agent-allow-list">
-          {allows.length === 0 && <li className="text-[13px] text-muted-foreground">—</li>}
-          {allows.map((s) => (
-            <li key={s.site} className="flex items-center justify-between rounded-btn bg-muted/50 px-3 py-1.5 text-[13px]">
-              <span>{s.site} <span className="text-muted-foreground">({s.kinds.join(", ")})</span></span>
-              <button className="text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "allow")}>{tr("agent.remove")}</button>
-            </li>
-          ))}
-        </ul>
-      </Card>
-      <Card>
-        <SectionLabel>{tr("agent.history")}</SectionLabel>
-        <ul className="mt-2 max-h-80 space-y-1 overflow-y-auto" data-testid="agent-history">
-          {runs.length === 0 && <li className="text-[13px] text-muted-foreground">{tr("agent.historyEmpty")}</li>}
+          )}
           {runs.map((r) => (
-            <li key={r.id} className="rounded-btn border border-border/60 px-3 py-2 text-[12.5px]">
-              <div className="font-medium">{r.task}</div>
-              <div className="truncate text-muted-foreground">{r.url}</div>
-              <div className="text-muted-foreground">{r.status} · {r.steps} steps · {new Date(r.startedAt).toLocaleString()}</div>
+            <li key={r.id} className="rounded-[12px] border border-border/60 bg-background/70 px-3.5 py-2.5 text-[12.5px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-foreground">{r.task}</span>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    r.status === "done" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {r.status} · {r.steps} steps
+                </span>
+              </div>
+              <div className="mt-1 truncate font-mono text-[11.5px] text-muted-foreground">{r.url}</div>
+              <div className="mt-0.5 text-[11.5px] text-muted-foreground">{new Date(r.startedAt).toLocaleString()}</div>
             </li>
           ))}
         </ul>

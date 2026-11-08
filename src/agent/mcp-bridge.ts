@@ -59,9 +59,13 @@ async function resolveTargetTab(tabId?: number): Promise<chrome.tabs.Tab> {
     return tab;
   }
   const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (active?.id && active.url && !isRestrictedUrl(active.url)) return active;
+  const allTabs = await chrome.tabs.query({});
+  const webTabs = allTabs
+    .filter((t) => t.id != null && t.url && !isRestrictedUrl(t.url))
+    .sort((a, b) => ((b as { lastAccessed?: number }).lastAccessed ?? 0) - ((a as { lastAccessed?: number }).lastAccessed ?? 0));
+  if (webTabs[0]?.id) return webTabs[0];
   if (active?.id) return active;
-  const [anyActive] = await chrome.tabs.query({ active: true });
-  if (anyActive?.id) return anyActive;
   throw new Error("No active browser tab found");
 }
 
@@ -246,6 +250,9 @@ export class McpBridgeClient {
   }
 
   getStatus(): McpBridgeStatus {
+    if (this.cfg.enabled && !this.connected && !this.ws && !this.reconnectTimer) {
+      this.connect();
+    }
     return {
       ...this.cfg,
       connected: this.connected,
