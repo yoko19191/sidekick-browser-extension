@@ -3,6 +3,7 @@ import { extractPage } from "@/src/lib/extract";
 import { normalizeText } from "@/src/lib/hash";
 import { PageUi } from "@/src/lib/page-ui";
 import { collectParagraphs, insertTranslation, markPending, restoreOriginal, TRANSLATION_CSS } from "@/src/lib/paragraphs";
+import { extractVideoTranscriptMarkdown, VIDEO_SUBTITLE_CSS, VideoSubtitleController } from "@/src/lib/video-subtitles";
 import type { Settings, TranslateState } from "@/src/lib/types";
 import { tr } from "@/src/i18n";
 import { handleAgentMessage } from "@/src/agent/page/content-host";
@@ -63,6 +64,7 @@ export default defineContentScript({
       ui.selectionEnabled = s.selectionTranslate && !never;
       ui.setFab(s.floatingButton && !never, active);
       document.documentElement.classList.toggle("pp-only", s.displayMode === "translation-only");
+      subtitleCtrl.updateConfig(s);
     };
 
     const report = () => {
@@ -71,12 +73,24 @@ export default defineContentScript({
       chrome.runtime.sendMessage({ type: "translate:state", state }).catch(() => {});
     };
 
+    const subtitleCtrl = new VideoSubtitleController({
+      doc: document,
+      translateBatch: (texts) => send<string[]>({ type: "translate:batch", texts }),
+      onStatsChange: ({ total = 0, done = 0, errors = 0 }) => {
+        if (!active) return;
+        state.total += total;
+        state.done += done;
+        state.errors += errors;
+        report();
+      },
+    });
+
     const ensureStyle = () => {
       if (document.getElementById("pp-style")) return;
       const st = document.createElement("style");
       st.id = "pp-style";
       st.setAttribute("data-pp-ui", "");
-      st.textContent = TRANSLATION_CSS;
+      st.textContent = `${TRANSLATION_CSS}\n${VIDEO_SUBTITLE_CSS}`;
       (document.head ?? document.documentElement).appendChild(st);
     };
     ensureStyle();
@@ -193,6 +207,7 @@ export default defineContentScript({
         { rootMargin: "800px 0px" },
       );
       scan(document.body);
+      subtitleCtrl.start(s);
       if (s.autoTranslateDynamic) {
         let pending: Element[] = [];
         let t: number | undefined;
@@ -218,6 +233,7 @@ export default defineContentScript({
 
     function stop() {
       active = false;
+      subtitleCtrl.stop();
       io?.disconnect();
       mo?.disconnect();
       io = mo = null;
@@ -231,8 +247,20 @@ export default defineContentScript({
       report();
     }
 
-    /** Scroll to and flash the block containing a verbatim excerpt (answer citations). */
+    /** Scroll to and flash the block containing a verbatim excerpt (or seek video when a [MM:SS] timestamp is cited). */
     function locate(excerpt: string): boolean {
+      const tsMatch = excerpt.match(/\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]/);
+      if (tsMatch) {
+        const video = document.querySelector("video");
+        if (video) {
+          const sec = tsMatch[3] != null
+            ? Number(tsMatch[1]) * 3600 + Number(tsMatch[2]) * 60 + Number(tsMatch[3])
+            : Number(tsMatch[1]) * 60 + Number(tsMatch[2]);
+          video.currentTime = sec;
+          video.scrollIntoView({ behavior: "smooth", block: "center" });
+          return true;
+        }
+      }
       const needle = normalizeText(excerpt).replace(/^["“'「]+|["”'」.。…]+$/g, "").toLowerCase();
       if (needle.length < 4) return false;
       const probes = [needle, needle.slice(0, 48), needle.slice(0, 24)];
@@ -279,6 +307,17 @@ export default defineContentScript({
             for (let attempt = 0; attempt < 3 && (document.readyState === "loading" || extracted.markdown.length < 80); attempt++) {
               await new Promise((r) => setTimeout(r, 150));
               extracted = extractPage(document);
+            }
+            const videoTranscript = await extractVideoTranscriptMarkdown(document).catch(() => null);
+            if (videoTranscript) {
+              const combined = extracted.markdown
+                ? `${videoTranscript}\n\n---\n\n${extracted.markdown}`
+                : videoTranscript;
+              extracted = {
+                ...extracted,
+                markdown: combined,
+                length: Math.max(extracted.length, combined.length),
+              };
             }
             sendResponse(extracted);
           })();

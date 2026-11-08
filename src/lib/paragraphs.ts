@@ -7,7 +7,8 @@ const INLINE = new Set([
 
 export const BASE_SKIP =
   "script,style,noscript,template,textarea,input,select,option,button,pre,code,kbd,samp,svg,math,iframe,canvas,video,audio," +
-  "[contenteditable=''],[contenteditable='true'],[translate='no'],.notranslate,.pp-trans,[data-pp-ui]";
+  "[contenteditable=''],[contenteditable='true'],[translate='no'],.notranslate,.pp-trans,[data-pp-ui]," +
+  ".ytp-caption-window-container,.bpx-player-subtitle-wrap,.player-timedtext,.vjs-text-track-display,.jw-text-track-container";
 
 export interface CollectOptions {
   skipSelectors?: string;
