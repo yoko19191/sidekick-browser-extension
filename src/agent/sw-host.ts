@@ -75,7 +75,7 @@ export function attachAgentPort(port: chrome.runtime.Port, deps: SwDeps) {
       const never = (await agentStore.listPolicies()).filter((p) => p.neverAct).map((p) => p.site);
       send({ type: "started", model: `${r.provider.name} · ${r.modelId}` });
       agent = new WebAgent({
-        model: toPiModel(r.provider, r.modelId),
+        model: toPiModel(r.provider, r.modelId, r.apiKey),
         streamFn: agentStreamFn(r.provider.kind),
         getApiKey: () => r.apiKey,
         driver: new TabDriver(req.tabId, deps.ensureInjected),

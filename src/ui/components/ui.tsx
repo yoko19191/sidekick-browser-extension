@@ -210,9 +210,9 @@ export function DropdownItem({ children, onSelect, checked, testId, icon: Icon }
   return (
     <DropdownPrimitive.Item onSelect={onSelect} data-testid={testId}
       className="flex cursor-default select-none items-center gap-2 rounded-sm px-2.5 py-2 text-[13px] outline-none data-[highlighted]:bg-muted">
-      {Icon && <Icon className="size-4 text-muted-foreground" />}
-      <span className="min-w-0 flex-1 truncate">{children}</span>
-      {checked && <Check className="size-4 text-primary" strokeWidth={2.4} />}
+      {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" />}
+      <span className="flex min-w-0 flex-1 items-center gap-2.5 truncate">{children}</span>
+      {checked && <Check className="size-4 shrink-0 text-primary" strokeWidth={2.4} />}
     </DropdownPrimitive.Item>
   );
 }

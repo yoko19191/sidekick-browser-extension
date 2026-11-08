@@ -1,5 +1,5 @@
 import {
-  Brain, CheckCircle2, ChevronDown, Cpu, Database, Download, Eye, EyeOff, Globe2, Keyboard, KeyRound, Languages, Loader2, MessageSquareText, Monitor, Moon, MousePointerClick, Palette, Plus, RefreshCw, RotateCcw, ShieldCheck, Sun, Trash2, Upload, X, XCircle, Zap,
+  CheckCircle2, ChevronDown, Database, Download, Eye, EyeOff, Globe2, Keyboard, KeyRound, Languages, Loader2, MessageSquareText, Monitor, Moon, MousePointerClick, Palette, Plus, RefreshCw, RotateCcw, ShieldCheck, Sun, Trash2, Upload, X, XCircle, Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { STYLE_LABELS } from "@/src/lib/batch";
@@ -10,6 +10,8 @@ import { defaultSettings, LANGUAGES } from "@/src/lib/settings";
 import type { DisplayMode, ModelRef, ProviderConfig, Settings, SummaryLength, ThemeMode, TranslationStyle } from "@/src/lib/types";
 import { Advanced, Button, Card, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownTrigger, Field, Group, inputCls, Row, SectionLabel, Segmented, Select, Switch, TextField, ToastProvider, useToast } from "../components/ui";
 import { Logo } from "../components/Logo";
+import { OAuthLoginBox } from "../components/OAuthLoginBox";
+import { ProviderIcon } from "../components/ProviderIcon";
 import { useProviders, useSettings, useTheme } from "../hooks";
 import { bg } from "../messaging";
 import { tr } from "@/src/i18n";
@@ -75,7 +77,6 @@ export function OptionsApp() {
 }
 
 const Hint = ({ children }: { children: ReactNode }) => <p className="px-1 pt-2 text-[12px] leading-5 text-muted-foreground">{children}</p>;
-const glyph = (id: string) => ({ anthropic: Brain, gemini: Zap, ollama: Database, custom: Globe2 } as Record<string, typeof Cpu>)[id] ?? Cpu;
 
 // ───────────────────────── 模型与密钥 ─────────────────────────
 function ModelsSection({ settings, update, providers }: Ctx) {
@@ -102,9 +103,21 @@ function ModelsSection({ settings, update, providers }: Ctx) {
           <DropdownTrigger asChild><Button size="sm" icon={Plus} testId="add-provider" className="mb-2">{tr("opt.addProvider")}</Button></DropdownTrigger>
           <DropdownContent align="end">
             <DropdownLabel>{tr("opt.openaiCompatible")}</DropdownLabel>
-            {PRESETS.filter((p) => p.kind === "openai-compatible").map((p) => <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>{p.name}</DropdownItem>)}
+            {PRESETS.filter((p) => p.kind === "openai-compatible").map((p) => (
+              <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>
+                <ProviderIcon presetId={p.id} size={15} />
+                <span className="truncate">{p.name}</span>
+                {p.oauth && <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{tr("oauth.badge")}</span>}
+              </DropdownItem>
+            ))}
             <DropdownLabel>{tr("opt.otherProtocols")}</DropdownLabel>
-            {PRESETS.filter((p) => p.kind !== "openai-compatible").map((p) => <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>{p.name}</DropdownItem>)}
+            {PRESETS.filter((p) => p.kind !== "openai-compatible").map((p) => (
+              <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>
+                <ProviderIcon presetId={p.id} size={15} />
+                <span className="truncate">{p.name}</span>
+                {p.oauth && <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{tr("oauth.badge")}</span>}
+              </DropdownItem>
+            ))}
           </DropdownContent>
         </Dropdown>
       </div>
@@ -173,11 +186,10 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
       setFetching(false);
     }
   };
-  const Icon = glyph(p.presetId);
   return (
     <Card className="overflow-hidden" data-testid={`provider-${p.presetId}`}>
       <button className="flex w-full items-center gap-3 px-4 py-3 text-left" onClick={onToggle} aria-expanded={open} data-testid={`provider-toggle-${p.presetId}`}>
-        <span className="grid size-8 place-items-center rounded-btn bg-background text-muted-foreground"><Icon className="size-4" /></span>
+        <span className="grid size-8 place-items-center rounded-btn bg-background text-muted-foreground"><ProviderIcon presetId={p.presetId} size={18} /></span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[14px] font-medium">{p.name}</div>
           <div className="truncate text-[12px] text-muted-foreground" data-testid="provider-summary">{ok ? tr("opt.providerSummary", { key: masked || tr("opt.noKeyNeeded"), n: p.models.length }) : tr("opt.noKey")}</div>
@@ -187,6 +199,20 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
       </button>
       {open && (
         <div className="animate-in space-y-4 border-t border-border/70 px-4 pb-4 pt-4">
+          {preset?.oauth && (
+            <OAuthLoginBox
+              oauthId={preset.oauth}
+              presetId={p.presetId}
+              providerId={p.id}
+              providerName={p.name}
+              onSuccess={(apiKey, oauthBaseUrl) => {
+                setKeyInput(apiKey);
+                if (oauthBaseUrl && oauthBaseUrl !== p.baseUrl) persist({ ...p, baseUrl: oauthBaseUrl });
+                toast({ text: tr("oauth.connected"), tone: "info" });
+              }}
+              onError={(msg) => toast({ text: msg, tone: "error", sticky: true })}
+            />
+          )}
           <TextField label="API Key" testId="api-key" type={show ? "text" : "password"} mono value={key} placeholder={preset?.keyOptional ? tr("common.optional") : "sk-…"}
             onChange={(v) => { setKeyInput(v); clearTimeout(keyTimer.current); keyTimer.current = window.setTimeout(() => setKey(p.id, v), 400); }}
             hint={preset?.keyUrl && <a className="text-primary hover:underline" href={preset.keyUrl} target="_blank" rel="noreferrer">{tr("opt.getKey")}</a>}

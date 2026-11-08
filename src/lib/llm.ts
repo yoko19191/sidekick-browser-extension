@@ -5,6 +5,7 @@
 import type { Api, AssistantMessageEvent, Context, Model, Tool, ToolCall } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { streamSimple as openaiStream } from "@earendil-works/pi-ai/api/openai-completions";
+import { stream as codexRawStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { streamSimple as geminiStream } from "@earendil-works/pi-ai/api/google-generative-ai";
 import { normalizeBaseUrl, redactSecrets } from "./providers";
@@ -18,9 +19,32 @@ const API_OF: Record<ProviderKind, Api> = {
   gemini: "google-generative-ai",
 };
 
+export const COPILOT_HEADERS: Record<string, string> = {
+  "User-Agent": "GitHubCopilotChat/0.35.0",
+  "Editor-Version": "vscode/1.107.0",
+  "Editor-Plugin-Version": "copilot-chat/0.35.0",
+  "Copilot-Integration-Id": "vscode-chat",
+};
+
+export const CHATGPT_CODEX_MODELS = ["gpt-5.3-codex-spark", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
+
+/** Detect whether an API key is a ChatGPT Plus/Pro OAuth JWT token (contains chatgpt_account_id claim). */
+export function isChatGPTOAuthToken(apiKey?: string): boolean {
+  if (!apiKey || !apiKey.startsWith("eyJ")) return false;
+  const parts = apiKey.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(b64));
+    return Boolean(payload?.["https://api.openai.com/auth"]?.chatgpt_account_id);
+  } catch {
+    return false;
+  }
+}
+
 export function inferModelMeta(modelId: string, kind: ProviderKind): { reasoning: boolean; contextWindow: number; maxTokens: number } {
   const m = modelId.toLowerCase();
-  const reasoning = /reason|thinking|\br[12]\b|\bo[134](?:-|\b)|\bqwq\b|zero-preview/i.test(m);
+  const reasoning = /reason|thinking|\br[12]\b|\bo[134](?:-|\b)|\bqwq\b|zero-preview|\bgemini-2\.5|\bcodex/i.test(m);
   let contextWindow = 128000;
   const kMatch = m.match(/(?:^|[-_:])(\d+)k(?:\b|$)/);
   if (kMatch) {
@@ -34,19 +58,22 @@ export function inferModelMeta(modelId: string, kind: ProviderKind): { reasoning
   return { reasoning, contextWindow, maxTokens };
 }
 
-export function toPiModel(p: ProviderConfig, modelId: string): Model<Api> {
+export function toPiModel(p: ProviderConfig, modelId: string, apiKey?: string): Model<Api> {
   const meta = inferModelMeta(modelId, p.kind);
+  const isCopilot = p.presetId === "github-copilot";
+  const isCodex = isChatGPTOAuthToken(apiKey) || p.baseUrl.includes("chatgpt.com/backend-api");
   return {
     id: modelId,
     name: modelId,
-    api: API_OF[p.kind],
-    provider: `sidekick-${p.presetId}`,
-    baseUrl: normalizeBaseUrl(p.baseUrl),
+    api: isCodex ? "openai-codex-responses" : API_OF[p.kind],
+    provider: isCodex ? "openai-codex" : isCopilot ? "github-copilot" : `sidekick-${p.presetId}`,
+    baseUrl: isCodex ? "https://chatgpt.com/backend-api" : normalizeBaseUrl(p.baseUrl),
     reasoning: meta.reasoning,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: meta.contextWindow,
     maxTokens: meta.maxTokens,
+    ...(isCopilot ? { headers: COPILOT_HEADERS } : {}),
   } as Model<Api>;
 }
 
@@ -62,7 +89,11 @@ export interface StreamArgs {
   tools?: Tool[];
 }
 
-function streamFor(kind: ProviderKind) {
+const codexStream: typeof openaiStream = (model, context, options) =>
+  codexRawStream(model as never, context, { ...(options as object), transport: "sse" } as never);
+
+function streamFor(kind: ProviderKind, api?: Api) {
+  if (api === "openai-codex-responses") return codexStream;
   return kind === "anthropic" ? anthropicStream : kind === "gemini" ? geminiStream : openaiStream;
 }
 
@@ -71,7 +102,7 @@ export async function streamText(
   args: StreamArgs,
   cb: { onDelta?: (t: string) => void; onThinking?: () => void } = {},
 ): Promise<{ text: string; stopReason?: string; toolCalls: ToolCall[] }> {
-  const model = toPiModel(args.provider, args.modelId);
+  const model = toPiModel(args.provider, args.modelId, args.apiKey);
   const now = Date.now();
   const ctx: Context = {
     systemPrompt: args.system,
@@ -91,7 +122,7 @@ export async function streamText(
           } as never),
     ),
   };
-  const stream = streamFor(args.provider.kind)(model as never, normalizeContext(ctx), {
+  const stream = streamFor(args.provider.kind, model.api)(model as never, normalizeContext(ctx), {
     apiKey: args.apiKey || "not-needed",
     signal: args.signal,
     temperature: args.temperature,
@@ -119,17 +150,25 @@ export async function streamText(
 
 // ---- connection test / model listing (plain fetch, no SDK needed) ----
 export async function listModels(p: ProviderConfig, apiKey?: string, signal?: AbortSignal): Promise<string[]> {
+  if (isChatGPTOAuthToken(apiKey) || p.baseUrl.includes("chatgpt.com/backend-api")) {
+    return [...CHATGPT_CODEX_MODELS];
+  }
   const base = normalizeBaseUrl(p.baseUrl);
   let res: Response;
   if (p.kind === "anthropic") {
+    const isOAuth = !!apiKey?.includes("sk-ant-oat");
     res = await fetch(`${base}/v1/models?limit=100`, {
-      headers: { "x-api-key": apiKey ?? "", "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      headers: isOAuth
+        ? { Authorization: `Bearer ${apiKey}`, "anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20", "anthropic-dangerous-direct-browser-access": "true" }
+        : { "x-api-key": apiKey ?? "", "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
       signal,
     });
   } else if (p.kind === "gemini") {
     res = await fetch(`${base}/models?pageSize=200`, { headers: { "x-goog-api-key": apiKey ?? "" }, signal });
   } else {
-    res = await fetch(`${base}/models`, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, signal });
+    const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+    if (p.presetId === "github-copilot") Object.assign(headers, COPILOT_HEADERS);
+    res = await fetch(`${base}/models`, { headers, signal });
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -161,5 +200,6 @@ export async function testConnection(p: ProviderConfig, modelId: string | undefi
 
 /** pi-agent-core StreamFn for a provider (used by the web-action agent in the service worker). */
 export function agentStreamFn(kind: ProviderKind): StreamFn {
-  return streamFor(kind) as unknown as StreamFn;
+  return ((model: Model<Api>, context: Context, options?: unknown) =>
+    streamFor(kind, model?.api)(model as never, normalizeContext(context), options as never)) as unknown as StreamFn;
 }

@@ -89,9 +89,11 @@ export function useActiveTab(): TabInfo | null {
     };
     chrome.tabs.onActivated.addListener(onActivated);
     chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.permissions?.onAdded?.addListener(onActivated);
     return () => {
       chrome.tabs.onActivated.removeListener(onActivated);
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.permissions?.onAdded?.removeListener(onActivated);
     };
   }, []);
   return tab;

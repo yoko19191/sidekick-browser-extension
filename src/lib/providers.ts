@@ -1,6 +1,8 @@
 import type { ModelRef, ProviderConfig, ProviderKind } from "./types";
 import { tr } from "@/src/i18n";
 
+export type OAuthProviderId = "chatgpt" | "openrouter" | "github-copilot" | "kimi-coding" | "xai" | "anthropic" | "meta";
+
 export interface ProviderPreset {
   id: string;
   name: string;
@@ -10,24 +12,35 @@ export interface ProviderPreset {
   keyUrl?: string;
   keyOptional?: boolean;
   hint?: string;
+  oauth?: OAuthProviderId;
 }
 
 export const PRESETS: ProviderPreset[] = [
+  { id: "openai", name: tr("preset.openai"), kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-5.3-codex-spark", "gpt-5.5"], keyUrl: "https://platform.openai.com/api-keys", oauth: "chatgpt" },
+  { id: "anthropic", name: "Anthropic", kind: "anthropic", baseUrl: "https://api.anthropic.com", models: ["claude-sonnet-4-5", "claude-haiku-4-5"], keyUrl: "https://console.anthropic.com/settings/keys", oauth: "anthropic" },
+  { id: "github-copilot", name: tr("preset.githubCopilot"), kind: "openai-compatible", baseUrl: "https://api.individual.githubcopilot.com", models: ["gpt-4.1", "claude-sonnet-4", "gpt-4o", "o3-mini"], oauth: "github-copilot" },
+  { id: "openrouter", name: "OpenRouter", kind: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", models: ["openai/gpt-4o-mini", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", oauth: "openrouter" },
+  { id: "kimi-coding", name: tr("preset.kimiCoding"), kind: "openai-compatible", baseUrl: "https://api.kimi.com/coding/v1", models: ["kimi-k2-0711-preview", "kimi-for-coding"], keyUrl: "https://www.kimi.com/code", oauth: "kimi-coding" },
+  { id: "xai", name: tr("preset.xai"), kind: "openai-compatible", baseUrl: "https://api.x.ai/v1", models: ["grok-3-mini", "grok-3"], keyUrl: "https://console.x.ai", oauth: "xai" },
+  { id: "meta", name: tr("preset.meta"), kind: "openai-compatible", baseUrl: "https://api.llama.com/compat/v1", models: ["Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-3.3-70B-Instruct"], keyUrl: "https://llama.developer.meta.com", oauth: "meta" },
   { id: "deepseek", name: "DeepSeek", kind: "openai-compatible", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"], keyUrl: "https://platform.deepseek.com/api_keys" },
-  { id: "openai", name: "OpenAI", kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"], keyUrl: "https://platform.openai.com/api-keys" },
   { id: "moonshot", name: tr("preset.moonshot"), kind: "openai-compatible", baseUrl: "https://api.moonshot.cn/v1", models: ["kimi-latest", "moonshot-v1-32k"], keyUrl: "https://platform.moonshot.cn/console/api-keys" },
   { id: "qwen", name: tr("preset.qwen"), kind: "openai-compatible", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: ["qwen-plus", "qwen-turbo", "qwen-max"], keyUrl: "https://bailian.console.aliyun.com/" },
   { id: "zhipu", name: tr("preset.zhipu"), kind: "openai-compatible", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4-flash", "glm-4-plus"], keyUrl: "https://open.bigmodel.cn/usercenter/apikeys" },
-  { id: "openrouter", name: "OpenRouter", kind: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", models: ["openai/gpt-4o-mini", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys" },
-  { id: "anthropic", name: "Anthropic", kind: "anthropic", baseUrl: "https://api.anthropic.com", models: ["claude-sonnet-4-5", "claude-haiku-4-5"], keyUrl: "https://console.anthropic.com/settings/keys" },
+  { id: "siliconflow", name: tr("preset.siliconflow"), kind: "openai-compatible", baseUrl: "https://api.siliconflow.cn/v1", models: ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen2.5-72B-Instruct"], keyUrl: "https://cloud.siliconflow.cn/account/ak" },
+  { id: "volcengine", name: tr("preset.volcengine"), kind: "openai-compatible", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", models: ["doubao-1-5-pro-32k-250115", "deepseek-v3-250324"], keyUrl: "https://console.volcengine.com/ark" },
   { id: "gemini", name: "Google Gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", models: ["gemini-2.5-flash", "gemini-2.5-pro"], keyUrl: "https://aistudio.google.com/apikey" },
+  { id: "groq", name: tr("preset.groq"), kind: "openai-compatible", baseUrl: "https://api.groq.com/openai/v1", models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], keyUrl: "https://console.groq.com/keys" },
+  { id: "mistral", name: tr("preset.mistral"), kind: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", models: ["mistral-small-latest", "mistral-large-latest"], keyUrl: "https://console.mistral.ai/api-keys" },
   { id: "ollama", name: tr("preset.ollama"), kind: "openai-compatible", baseUrl: "http://localhost:11434/v1", models: ["qwen2.5:7b"], keyOptional: true, hint: tr("preset.ollamaHint") },
   { id: "custom", name: tr("preset.custom"), kind: "openai-compatible", baseUrl: "", models: [], hint: tr("preset.customHint") },
 ];
 
 export const PROVIDERS_KEY = "providers";
 const SECRET_PREFIX = "secret:";
+const OAUTH_PREFIX = "oauth:";
 export const secretKey = (providerId: string) => `${SECRET_PREFIX}${providerId}`;
+export const oauthKey = (providerId: string) => `${OAUTH_PREFIX}${providerId}`;
 
 export function newProviderFromPreset(p: ProviderPreset, now = Date.now()): ProviderConfig {
   return {
@@ -120,7 +133,7 @@ export async function setKey(providerId: string, key: string) {
 export async function deleteProvider(providerId: string) {
   const list = (await loadProviders()).filter((p) => p.id !== providerId);
   await saveProviders(list);
-  await chrome.storage.local.remove(secretKey(providerId));
+  await chrome.storage.local.remove([secretKey(providerId), oauthKey(providerId)]);
 }
 export async function keyStatus(): Promise<Record<string, string>> {
   const all = await chrome.storage.local.get(null);
