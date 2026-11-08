@@ -16,7 +16,12 @@ export function extractPage(doc: Document = document, maxChars = MAX_DOC_CHARS):
     article = null;
   }
   const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
-  td.remove(["script", "style", "noscript", "iframe", "svg"] as never);
+  td.remove(["script", "style", "noscript", "iframe", "svg", "img", "picture", "video", "audio", "canvas"] as never);
+  // Strip inline URLs from links: they often double the token count of articles without adding reading value.
+  td.addRule("plainLink", {
+    filter: "a",
+    replacement: (content) => content,
+  });
   let markdown = "";
   if (article?.content) markdown = td.turndown(article.content);
   if (!markdown || markdown.length < 200) {
@@ -26,9 +31,20 @@ export function extractPage(doc: Document = document, maxChars = MAX_DOC_CHARS):
   }
   const fullLength = markdown.length;
   if (markdown.length > maxChars) markdown = markdown.slice(0, maxChars) + "\n\n…（内容过长，已截断）";
+  const iconHref = doc.querySelector<HTMLLinkElement>('link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')?.href;
+  let favIconUrl = iconHref || undefined;
+  if (!favIconUrl && /^https?:/.test(url)) {
+    try {
+      favIconUrl = new URL("/favicon.ico", url).href;
+    } catch {
+      /* ignore */
+    }
+  }
+  const rawTitle = (article?.title || doc.title || "").trim();
   return {
-    title: article?.title || doc.title || url,
+    title: rawTitle || url,
     url,
+    favIconUrl,
     markdown,
     excerpt: article?.excerpt ?? undefined,
     byline: article?.byline ?? undefined,

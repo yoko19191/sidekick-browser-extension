@@ -27,10 +27,12 @@ export default defineContentScript({
     let state: TranslateState = { active: false, total: 0, done: 0, errors: 0 };
     let io: IntersectionObserver | null = null;
     let mo: MutationObserver | null = null;
-    let queue: { el: Element; text: string }[] = [];
+    let queue: { el: Element; text: string; inViewport?: boolean }[] = [];
     let inflight = 0;
+    let dispatchedBatches = 0;
     let flushTimer: number | undefined;
     let seen = new WeakSet<Element>();
+    let paraText = new WeakMap<Element, string>();
     const host = location.host;
 
     const send = <T = unknown>(msg: Record<string, unknown>) =>
@@ -92,6 +94,7 @@ export default defineContentScript({
       for (const p of paras) {
         if (seen.has(p.el)) continue;
         seen.add(p.el);
+        paraText.set(p.el, p.text);
         state.total++;
         io?.observe(p.el);
       }
@@ -100,21 +103,31 @@ export default defineContentScript({
 
     function enqueue(el: Element) {
       if (!cfg) return;
-      const text = collectParagraphs(el, { skipSelectors: cfg.skipSelectors }).find((p) => p.el === el)?.text;
+      const text = paraText.get(el) ?? collectParagraphs(el, { skipSelectors: cfg.skipSelectors }).find((p) => p.el === el)?.text;
       if (!text) return;
       el.querySelectorAll(":scope > .pp-failed").forEach((n) => n.remove());
       markPending(el, true);
-      queue.push({ el, text });
+      const r = (el as HTMLElement).getBoundingClientRect?.();
+      const inViewport = !!r && r.bottom > 0 && r.top < (window.innerHeight || 800);
+      queue.push({ el, text, inViewport });
       clearTimeout(flushTimer);
-      flushTimer = window.setTimeout(pump, 60);
+      flushTimer = window.setTimeout(pump, 12);
     }
 
     function pump() {
       if (!cfg || !active) return;
-      while (inflight < cfg.concurrency && queue.length) {
-        const [batch] = makeBatches(queue.map((q, i) => ({ id: i, text: q.text })), { maxChars: cfg.batchMaxChars, maxItems: cfg.batchMaxItems });
+      // Prioritize paragraphs actually inside the current viewport ahead of the 800px rootMargin buffer.
+      queue.sort((a, b) => (a.inViewport === b.inViewport ? 0 : a.inViewport ? -1 : 1));
+      const maxConcurrency = Math.max(cfg.concurrency, 4);
+      while (inflight < maxConcurrency && queue.length) {
+        // Progressive micro-batching: keep the first 2 batches small so the top of the page renders in ~1s.
+        const fastFirstScreen = dispatchedBatches < 2;
+        const maxChars = fastFirstScreen ? Math.min(500, cfg.batchMaxChars) : cfg.batchMaxChars;
+        const maxItems = fastFirstScreen ? Math.min(4, cfg.batchMaxItems) : cfg.batchMaxItems;
+        const [batch] = makeBatches(queue.map((q, i) => ({ id: i, text: q.text })), { maxChars, maxItems });
         const items = queue.splice(0, batch.length);
         inflight++;
+        dispatchedBatches++;
         runBatch(items).finally(() => {
           inflight--;
           pump();
@@ -167,6 +180,7 @@ export default defineContentScript({
     function start(s: TSettings) {
       applyConfig(s);
       active = true;
+      dispatchedBatches = 0;
       state = { active: true, total: 0, done: 0, errors: 0 };
       io = new IntersectionObserver(
         (entries) => {
@@ -208,7 +222,9 @@ export default defineContentScript({
       mo?.disconnect();
       io = mo = null;
       queue = [];
+      dispatchedBatches = 0;
       seen = new WeakSet();
+      paraText = new WeakMap();
       chrome.runtime.sendMessage({ type: "translate:abort" }).catch(() => {});
       restoreOriginal(document);
       state = { active: false, total: 0, done: 0, errors: 0 };
