@@ -16,6 +16,7 @@ export function defaultTargetLang(uiLang?: string): string {
 export function defaultSettings(uiLang?: string): Settings {
   return {
     theme: "system",
+    uiLocale: "auto",
     models: { chat: "auto", summary: "auto", translate: "auto" },
     translation: {
       targetLang: defaultTargetLang(uiLang),

@@ -18,10 +18,12 @@ export type ModelRef = "auto" | `${string}::${string}`;
 export type TranslationStyle = "green" | "plain" | "dashed" | "faded" | "highlight" | "card";
 export type SummaryLength = "short" | "medium" | "detailed";
 export type ThemeMode = "system" | "light" | "dark";
+export type UiLocale = "auto" | "zh" | "en";
 export type DisplayMode = "bilingual" | "translation-only";
 
 export interface Settings {
   theme: ThemeMode;
+  uiLocale?: UiLocale;
   models: { chat: ModelRef; summary: ModelRef; translate: ModelRef };
   translation: {
     targetLang: string; // BCP-47, e.g. zh-CN

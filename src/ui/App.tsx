@@ -23,7 +23,7 @@ export function App() {
   return (
     <ToastProvider>
       <div className="relative h-full overflow-hidden">
-        <ChatView settings={settings} update={update} providers={providers.providers} masked={providers.masked} onSetup={() => setOnboarding(true)} />
+        <ChatView settings={settings} update={update} providers={providers.providers} masked={providers.masked} providersObj={providers} onSetup={() => setOnboarding(true)} />
         {loaded && onboarding && providers.loaded && (
           <div className="absolute inset-0 z-30 bg-background">
             <Onboarding settings={settings} update={update} providers={providers} onDone={finish} />

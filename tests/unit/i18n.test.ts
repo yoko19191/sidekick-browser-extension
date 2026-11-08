@@ -36,12 +36,13 @@ describe("i18n", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("interpolates params and falls back to zh_CN for missing English keys", () => {
+  it("interpolates params and switches between zh_CN and en catalogs", () => {
     setLocale("zh-CN");
     expect(tr("chat.translating", { done: 3, total: 9 })).toBe("正在翻译 3/9");
     setLocale("en-US");
     expect(tr("brand.name")).toBe("Sidekick");
-    expect(tr("chat.summarizePage")).toBe(zh_CN["chat.summarizePage"]);
+    expect(tr("chat.summarizePage")).toBe("Summarize page");
+    expect(tr("chat.translating", { done: 3, total: 9 })).toBe("Translating 3/9");
     setLocale("zh-CN");
     expect(tr("brand.name")).toBe("翻翻");
   });

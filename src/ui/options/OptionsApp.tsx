@@ -7,28 +7,28 @@ import { ConversationStore } from "@/src/lib/db";
 import { DEFAULT_KEYPOINTS_TEMPLATE, DEFAULT_SUMMARY_TEMPLATE } from "@/src/lib/prompts";
 import { deleteProvider, getKey, keyOptional, modelRef, newProviderFromPreset, normalizeBaseUrl, PRESETS, resolveModelRef, setKey } from "@/src/lib/providers";
 import { defaultSettings, LANGUAGES } from "@/src/lib/settings";
-import type { DisplayMode, ModelRef, ProviderConfig, Settings, SummaryLength, ThemeMode, TranslationStyle } from "@/src/lib/types";
+import type { DisplayMode, ModelRef, ProviderConfig, Settings, SummaryLength, ThemeMode, TranslationStyle, UiLocale } from "@/src/lib/types";
 import { Advanced, Button, Card, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownTrigger, Field, Group, inputCls, Row, SectionLabel, Segmented, Select, Switch, TextField, ToastProvider, useToast } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { OAuthLoginBox } from "../components/OAuthLoginBox";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { useProviders, useSettings, useTheme } from "../hooks";
 import { bg } from "../messaging";
-import { tr } from "@/src/i18n";
+import { tr, type MessageKey } from "@/src/i18n";
 import { DEFAULT_MCP_PORT, type McpBridgeStatus } from "@/src/agent/mcp-bridge";
 
 type SectionId = "models" | "translation" | "chat" | "appearance" | "shortcuts" | "data" | "agent";
-const SECTIONS: { id: SectionId; label: string; icon: typeof KeyRound }[] = [
-  { id: "models", label: tr("nav.models"), icon: KeyRound },
-  { id: "translation", label: tr("nav.translation"), icon: Languages },
-  { id: "chat", label: tr("nav.chat"), icon: MessageSquareText },
-  { id: "appearance", label: tr("nav.appearance"), icon: Palette },
-  { id: "shortcuts", label: tr("nav.shortcuts"), icon: Keyboard },
-  { id: "data", label: tr("nav.data"), icon: ShieldCheck },
-  { id: "agent", label: tr("nav.agent"), icon: MousePointerClick },
+const SECTIONS: { id: SectionId; labelKey: MessageKey; icon: typeof KeyRound }[] = [
+  { id: "models", labelKey: "nav.models", icon: KeyRound },
+  { id: "translation", labelKey: "nav.translation", icon: Languages },
+  { id: "chat", labelKey: "nav.chat", icon: MessageSquareText },
+  { id: "appearance", labelKey: "nav.appearance", icon: Palette },
+  { id: "shortcuts", labelKey: "nav.shortcuts", icon: Keyboard },
+  { id: "data", labelKey: "nav.data", icon: ShieldCheck },
+  { id: "agent", labelKey: "nav.agent", icon: MousePointerClick },
 ];
 
-type Ctx = { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ReturnType<typeof useProviders> };
+export type Ctx = { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ReturnType<typeof useProviders> };
 
 export function OptionsApp() {
   const { settings, update } = useSettings();
@@ -55,13 +55,13 @@ export function OptionsApp() {
               <button key={s.id} data-testid={`nav-${s.id}`} onClick={() => setSection(s.id)}
                 className={cn("flex w-full items-center gap-2.5 whitespace-nowrap rounded-btn px-3 py-2 text-[13.5px] font-medium transition", section === s.id ? "bg-primary-soft text-primary-soft-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                 <s.icon className="size-4" strokeWidth={1.9} />
-                {s.label}
+                {tr(s.labelKey)}
               </button>
             ))}
           </div>
         </nav>
         <main className="min-w-0 max-w-[680px] flex-1" data-testid={`section-${section}`} key={section}>
-          <h1 className="animate-in text-[22px] font-semibold tracking-tight">{SECTIONS.find((s) => s.id === section)!.label}</h1>
+          <h1 className="animate-in text-[22px] font-semibold tracking-tight">{tr(SECTIONS.find((s) => s.id === section)!.labelKey)}</h1>
           <div className="animate-in">
             {section === "models" && <ModelsSection {...ctx} />}
             {section === "translation" && <TranslationSection {...ctx} />}
@@ -80,7 +80,7 @@ export function OptionsApp() {
 const Hint = ({ children }: { children: ReactNode }) => <p className="px-1 pt-2 text-[12px] leading-5 text-muted-foreground">{children}</p>;
 
 // ───────────────────────── 模型与密钥 ─────────────────────────
-function ModelsSection({ settings, update, providers }: Ctx) {
+export function ModelsSection({ settings, update, providers }: Ctx) {
   const usable = (p: ProviderConfig) => !!providers.masked[p.id] || keyOptional(p);
   const [openId, setOpenId] = useState<string | null>(null);
   const add = async (presetId: string) => {
@@ -292,7 +292,7 @@ function SiteList({ label, items, onChange, placeholder, testId }: { label: stri
   );
 }
 
-function TranslationSection({ settings, update }: Ctx) {
+export function TranslationSection({ settings, update }: Ctx) {
   const t = settings.translation;
   const d = defaultSettings().translation;
   const set = (patch: Partial<Settings["translation"]>) => update((s) => ({ ...s, translation: { ...s.translation, ...patch } }));
@@ -346,7 +346,7 @@ function StylePreview({ style }: { style: TranslationStyle }) {
 }
 
 // ───────────────────────── 对话与提示词 ─────────────────────────
-function ChatSection({ settings, update }: Ctx) {
+export function ChatSection({ settings, update }: Ctx) {
   const sm = settings.summary;
   const setS = (patch: Partial<Settings["summary"]>) => update((s) => ({ ...s, summary: { ...s.summary, ...patch } }));
   const setP = (patch: Partial<Settings["prompts"]>) => update((s) => ({ ...s, prompts: { ...s.prompts, ...patch } }));
@@ -383,7 +383,7 @@ function ChatSection({ settings, update }: Ctx) {
 }
 
 // ───────────────────────── 外观 / 快捷键 ─────────────────────────
-function AppearanceSection({ settings, update }: Ctx) {
+export function AppearanceSection({ settings, update }: Ctx) {
   return (
     <>
       <SectionLabel>{tr("opt.theme")}</SectionLabel>
@@ -392,6 +392,11 @@ function AppearanceSection({ settings, update }: Ctx) {
           options={[{ value: "system", label: tr("theme.system"), icon: Monitor }, { value: "light", label: tr("theme.light"), icon: Sun }, { value: "dark", label: tr("theme.dark"), icon: Moon }]} />
       </Card>
       <Hint>{tr("opt.themeHint")}</Hint>
+      <SectionLabel>{tr("opt.uiLocale")}</SectionLabel>
+      <Card className="p-4">
+        <Segmented<UiLocale> testId="ui-locale" value={settings.uiLocale ?? "auto"} onChange={(v) => update((s) => ({ ...s, uiLocale: v }))}
+          options={[{ value: "auto", label: tr("opt.uiLocaleAuto") }, { value: "zh", label: tr("opt.uiLocaleZh") }, { value: "en", label: tr("opt.uiLocaleEn") }]} />
+      </Card>
     </>
   );
 }
@@ -415,7 +420,7 @@ function ShortcutsSection() {
 }
 
 // ───────────────────────── 数据与隐私 ─────────────────────────
-function DataSection({ update }: Ctx) {
+export function DataSection({ update }: Ctx) {
   const toast = useToast();
   const [all, setAll] = useState(false);
   const [count, setCount] = useState<number | null>(null);
@@ -782,7 +787,7 @@ function McpBridgeCard() {
   );
 }
 
-function AgentSection() {
+export function AgentSection() {
   const [neverSites, setNever] = useState<{ site: string }[]>([]);
   const [allows, setAllows] = useState<{ site: string; kinds: string[] }[]>([]);
   const [runs, setRuns] = useState<{ id: string; task: string; url: string; status: string; startedAt: number; steps: number }[]>([]);

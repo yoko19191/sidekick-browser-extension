@@ -1,5 +1,5 @@
 import {
-  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, RotateCcw, ScanText, Settings2, Square, TextQuote, Trash2, X,
+  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, RotateCcw, ScanText, Settings2, Square, Sun, TextQuote, Trash2, X,
 } from "lucide-react";
 import { AgentRun } from "./AgentRun";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,12 +7,13 @@ import { SafeMarkdown } from "./Markdown";
 import { ConversationStore, type Conversation } from "@/src/lib/db";
 import { DEFAULT_KEYPOINTS_TEMPLATE, deriveChatTitle, displayPageTitle } from "@/src/lib/prompts";
 import { keyOptional, modelRef, resolveModelRef } from "@/src/lib/providers";
-import { LANGUAGES, langLabel } from "@/src/lib/settings";
-import type { ChatTurn, DisplayMode, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
-import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, Popover, PopoverContent, PopoverTrigger, Segmented, Select, Switch, useToast } from "./components/ui";
+import { langLabel } from "@/src/lib/settings";
+import type { ChatTurn, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
+import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, useToast } from "./components/ui";
 import { ProviderIcon } from "./components/ProviderIcon";
 import { Mascot, type MascotState } from "./mascot/Mascot";
-import { useActiveTab, type TabInfo } from "./hooks";
+import { useActiveTab, type TabInfo, type useProviders } from "./hooks";
+import { SidebarSettings, type SidebarSettingsPage } from "./SidebarSettings";
 import { pageErrorOf, restrictedUrl as restricted, usePageContent } from "./usePageContent";
 import { isFileUrl } from "@/src/lib/pdf/bytes";
 import { bg, llm } from "./messaging";
@@ -44,7 +45,21 @@ interface ConvEntry {
   favIconUrl?: string;
 }
 
-export function ChatView({ settings, update, providers, masked, onSetup }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ProviderConfig[]; masked: Record<string, string>; onSetup: () => void }) {
+export function ChatView({
+  settings,
+  update,
+  providers,
+  masked,
+  providersObj,
+  onSetup,
+}: {
+  settings: Settings;
+  update: (fn: (s: Settings) => Settings) => void;
+  providers: ProviderConfig[];
+  masked: Record<string, string>;
+  providersObj: ReturnType<typeof useProviders>;
+  onSetup: () => void;
+}) {
   const tab = useActiveTab();
   const toast = useToast();
   const [convs, setConvs] = useState<Record<string, ConvEntry>>({});
@@ -65,6 +80,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
   const failPage = (e: unknown) => page.setError(pageErrorOf(e, tab?.url ?? ""));
   const [tstate, setTstate] = useState<TranslateState | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SidebarSettingsPage | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const [agentTask, setAgentTask] = useState<{ tabId: number; task: string; key: number } | null>(null);
   const [flash, setFlash] = useState<"done" | "surprised" | null>(null); // brief mascot reactions
@@ -309,17 +325,25 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     : translatingNow ? "translating"
     : flash ?? (composerFocused ? "typing" : "idle");
 
+  const isDark =
+    settings.theme === "dark" ||
+    (settings.theme === "system" &&
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)")?.matches);
+  const toggleTheme = () => update((s) => ({ ...s, theme: isDark ? "light" : "dark" }));
+
   const round = "size-9 rounded-full border border-border bg-background text-foreground/75 hover:bg-muted hover:text-foreground";
   return (
     <div className="flex h-full flex-col">
-      {/* top row: round outlined buttons — new chat · history | translate · settings */}
+      {/* top row: round outlined buttons — new chat · history | translate · theme · settings */}
       <header className="flex h-14 shrink-0 items-center gap-2 px-3">
         <IconButton icon={MessageSquarePlus} label={tr("chat.newChat")} className={round} onClick={() => setConvs((c) => ({ ...c, [tabKey]: { id: newId(), messages: [] } }))} testId="new-chat" />
         <IconButton icon={History} label={tr("chat.history")} className={round} onClick={() => setHistoryOpen(true)} testId="open-history" />
         <div className="flex-1" />
         <IconButton icon={Languages} label={translating ? tr("chat.showOriginal") : tr("chat.translatePage")} active={translating} onClick={toggleTranslate} testId="translate-toggle" disabled={!pageOk}
           className={cn(round, translating && "border-primary/40 bg-primary-soft text-primary-soft-foreground", "disabled:opacity-40")} />
-        <QuickSettings settings={settings} update={update} tab={tab} host={host} className={round} />
+        <IconButton icon={isDark ? Sun : Moon} label={tr("chat.toggleTheme")} className={round} onClick={toggleTheme} testId="theme-toggle" />
+        <IconButton icon={Settings2} label={tr("qs.title")} className={round} onClick={() => setSettingsPage("root")} testId="open-quick-settings" />
       </header>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
@@ -425,7 +449,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
                   </div>
                 ))}
                 <DropdownSeparator />
-                <DropdownItem icon={Settings2} onSelect={() => chrome.runtime.openOptionsPage()}>{tr("chat.manageModels")}</DropdownItem>
+                <DropdownItem icon={Settings2} onSelect={() => setSettingsPage("models")}>{tr("chat.manageModels")}</DropdownItem>
               </DropdownContent>
             </Dropdown>
             {busy ? (
@@ -441,6 +465,18 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
           </div>
         </div>
       </div>
+
+      {settingsPage && (
+        <SidebarSettings
+          settings={settings}
+          update={update}
+          providers={providersObj}
+          tab={tab}
+          host={host}
+          initialPage={settingsPage}
+          onClose={() => setSettingsPage(null)}
+        />
+      )}
 
       {historyOpen && (
         <HistoryDrawer
@@ -516,52 +552,6 @@ function PageChip({ tab, pageTitle, favIconUrl, host, className }: { tab: TabInf
         <div className="truncate text-[12px] text-muted-foreground">{host || tr("chat.noAccessYet")}</div>
       </div>
     </div>
-  );
-}
-
-/** Level-1 settings: a popover with only the most frequently changed switches. */
-function QuickSettings({ settings, update, tab, host, className }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; tab: TabInfo | null; host: string; className?: string }) {
-  const t = settings.translation;
-  const auto = !!host && t.autoSites.includes(host);
-  const setT = (patch: Partial<Settings["translation"]>) => update((s) => ({ ...s, translation: { ...s.translation, ...patch } }));
-  async function toggleAuto(on: boolean) {
-    if (!host || !tab) return;
-    if (on) {
-      const ok = await chrome.permissions.request({ origins: [`${new URL(tab.url).origin}/*`] }).catch(() => false);
-      if (!ok) return;
-    }
-    setT({ autoSites: on ? [...new Set([...t.autoSites, host])] : t.autoSites.filter((h) => h !== host), neverSites: t.neverSites.filter((h) => h !== host) });
-    if (on) bg({ type: "translate:toggle", tabId: tab.id, force: true }).catch(() => {});
-  }
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <IconButton icon={Settings2} label={tr("qs.title")} testId="open-quick-settings" className={className} />
-      </PopoverTrigger>
-      <PopoverContent testId="quick-settings">
-        <div className="space-y-3.5">
-          <div>
-            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">{tr("qs.targetLang")}</div>
-            <Select testId="qs-target-lang" value={t.targetLang} onChange={(v) => setT({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />
-          </div>
-          <div>
-            <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">{tr("qs.displayMode")}</div>
-            <Segmented<DisplayMode> testId="qs-display-mode" value={t.displayMode} onChange={(v) => setT({ displayMode: v })} options={[{ value: "bilingual", label: tr("mode.bilingual") }, { value: "translation-only", label: tr("mode.only") }]} />
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium">{tr("qs.autoSite")}</div>
-              <div className="truncate text-[12px] text-muted-foreground">{host || tr("qs.unsupportedPage")}</div>
-            </div>
-            <Switch testId="qs-auto-site" checked={auto} onChange={toggleAuto} label={tr("qs.autoSite")} />
-          </div>
-          <div className="h-px bg-border/70" />
-          <button data-testid="qs-more" onClick={() => chrome.runtime.openOptionsPage()} className="flex w-full items-center justify-between rounded-btn px-1 py-1 text-[13px] font-medium text-muted-foreground hover:text-foreground">
-            {tr("qs.more")} <span aria-hidden>→</span>
-          </button>
-        </div>
-      </PopoverContent>
-    </Popover>
   );
 }
 

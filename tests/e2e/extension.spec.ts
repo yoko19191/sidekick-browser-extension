@@ -65,7 +65,7 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await panel.close();
   });
 
-  test("panel: model switch dropdown + gear popover holds only quick settings", async () => {
+  test("panel: model switch dropdown + in-sidebar Kimi-style settings drawer", async () => {
     const page = await openArticle();
     const panel = await openPanel(article);
     await panel.getByTestId("model-switch").click();
@@ -79,10 +79,10 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await expect(qs.getByTestId("qs-target-lang")).toBeVisible();
     await expect(qs.getByTestId("qs-display-mode")).toBeVisible();
     await expect(qs.getByTestId("qs-auto-site")).toBeVisible();
-    const [options] = await Promise.all([context.waitForEvent("page"), qs.getByTestId("qs-more").click()]);
-    await options.waitForLoadState();
-    expect(options.url()).toContain("/options.html");
-    await options.close();
+    await qs.getByTestId("qs-more").click();
+    await expect(qs.getByTestId("add-provider")).toBeVisible();
+    await qs.getByTestId("settings-back").click();
+    await qs.getByTestId("settings-back").click();
     await panel.close();
     await page.close();
   });

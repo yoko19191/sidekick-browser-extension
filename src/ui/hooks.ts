@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { defaultSettings, loadSettings, saveSettings, SETTINGS_KEY } from "@/src/lib/settings";
 import { keyStatus, loadProviders, PROVIDERS_KEY, saveProviders } from "@/src/lib/providers";
+import { setLocale } from "@/src/i18n";
 import type { ProviderConfig, Settings } from "@/src/lib/types";
 
 export function useSettings() {
   const [settings, setSettings] = useState<Settings>(() => defaultSettings(chrome.i18n?.getUILanguage?.()));
   const [loaded, setLoaded] = useState(false);
+  setLocale(settings.uiLocale ?? "auto");
   useEffect(() => {
     loadSettings().then((s) => {
+      setLocale(s.uiLocale ?? "auto");
       setSettings(s);
       setLoaded(true);
     });
     const onChange = (ch: Record<string, chrome.storage.StorageChange>, area: string) => {
-      if (area === "local" && ch[SETTINGS_KEY]) loadSettings().then(setSettings);
+      if (area === "local" && ch[SETTINGS_KEY]) {
+        loadSettings().then((s) => {
+          setLocale(s.uiLocale ?? "auto");
+          setSettings(s);
+        });
+      }
     };
     chrome.storage.onChanged.addListener(onChange);
     return () => chrome.storage.onChanged.removeListener(onChange);
@@ -20,6 +28,7 @@ export function useSettings() {
   const update = useCallback((fn: (s: Settings) => Settings) => {
     setSettings((prev) => {
       const next = fn(structuredClone(prev));
+      setLocale(next.uiLocale ?? "auto");
       saveSettings(next);
       return next;
     });

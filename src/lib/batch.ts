@@ -100,10 +100,10 @@ export function parseTranslationResponse(reply: string, expected: number): strin
 }
 
 export const STYLE_LABELS: Record<TranslationStyle, string> = {
-  green: tr("style.green"),
-  plain: tr("style.plain"),
-  dashed: tr("style.dashed"),
-  faded: tr("style.faded"),
-  highlight: tr("style.highlight"),
-  card: tr("style.card"),
+  get green() { return tr("style.green"); },
+  get plain() { return tr("style.plain"); },
+  get dashed() { return tr("style.dashed"); },
+  get faded() { return tr("style.faded"); },
+  get highlight() { return tr("style.highlight"); },
+  get card() { return tr("style.card"); },
 };

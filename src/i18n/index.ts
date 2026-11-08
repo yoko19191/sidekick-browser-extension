@@ -27,11 +27,28 @@ export function detectLocale(uiLang?: string): string {
   return base in CATALOGS ? base : "zh";
 }
 
-let current: Catalog = CATALOGS[detectLocale()];
+let currentId: string = detectLocale();
+let current: Catalog = CATALOGS[currentId];
+const listeners = new Set<() => void>();
 
-/** For tests / a future in-app language switch. */
-export function setLocale(id: string) {
-  current = CATALOGS[detectLocale(id)];
+/** Switch the active UI locale ("auto" uses browser UI language, or "zh" / "en"). */
+export function setLocale(id?: string) {
+  const nextId = !id || id === "auto" ? detectLocale() : detectLocale(id);
+  const changed = nextId !== currentId;
+  currentId = nextId;
+  current = CATALOGS[nextId];
+  if (changed) {
+    for (const fn of listeners) fn();
+  }
+}
+
+export function getLocale(): string {
+  return currentId;
+}
+
+export function onLocaleChange(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
 }
 
 export function tr(key: MessageKey, params?: Record<string, string | number>): string {
