@@ -415,4 +415,13 @@ export const en: Catalog = {
   "sb.version": "Version",
   "sb.styleAndPrompts": "Style & Prompts",
   "sb.dataAndPrivacy": "Data, cache & backup",
+  "hud.agentActive": "Sidekick Agent Operating",
+  "hud.inspecting": "Inspecting page structure…",
+  "hud.clicking": "Clicking {target}",
+  "hud.hovering": "Hovering {target}",
+  "hud.typing": "Typing into {target}",
+  "hud.scrolling": "Scrolling page ({dir})",
+  "hud.pressing": "Pressing key {key}",
+  "hud.selecting": "Selecting option {target}",
+  "hud.extracting": "Extracting page content…",
 };

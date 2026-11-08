@@ -93,7 +93,7 @@ export function ModelsSection({ settings, update, providers }: Ctx) {
     const r = resolveModelRef(settings.models[k], providers.providers, usable);
     return (
       <Row title={title} subtitle={r ? tr("opt.currentModel", { provider: r.provider.name, model: r.modelId }) : desc} chevron={false}
-        right={<Select className="w-56" testId={`task-model-${k}`} value={opts.some((o) => o.value === settings.models[k]) ? settings.models[k] : "auto"} options={opts} onChange={(v) => update((s) => ({ ...s, models: { ...s.models, [k]: v as ModelRef } }))} />} />
+        right={<Select className="w-40 shrink-0 sm:w-56" testId={`task-model-${k}`} value={opts.some((o) => o.value === settings.models[k]) ? settings.models[k] : "auto"} options={opts} onChange={(v) => update((s) => ({ ...s, models: { ...s.models, [k]: v as ModelRef } }))} />} />
     );
   };
   return (
@@ -300,8 +300,8 @@ export function TranslationSection({ settings, update }: Ctx) {
     <>
       <SectionLabel>{tr("opt.basics")}</SectionLabel>
       <Group>
-        <Row title={tr("qs.targetLang")} chevron={false} right={<Select className="w-44" testId="target-lang" value={t.targetLang} onChange={(v) => set({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />} />
-        <Row title={tr("opt.displayMode")} chevron={false} right={<Segmented<DisplayMode> className="w-52" value={t.displayMode} onChange={(v) => set({ displayMode: v })} options={[{ value: "bilingual", label: tr("mode.bilingual") }, { value: "translation-only", label: tr("mode.only") }]} />} />
+        <Row title={tr("qs.targetLang")} chevron={false} right={<Select className="w-36 shrink-0 sm:w-44" testId="target-lang" value={t.targetLang} onChange={(v) => set({ targetLang: v })} options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))} />} />
+        <Row title={tr("opt.displayMode")} chevron={false} right={<Segmented<DisplayMode> className="shrink-0" value={t.displayMode} onChange={(v) => set({ displayMode: v })} options={[{ value: "bilingual", label: tr("mode.bilingual") }, { value: "translation-only", label: tr("mode.only") }]} />} />
         <Row title={tr("opt.fab")} subtitle={tr("opt.fabHint")} chevron={false} right={<Switch testId="fab-switch" checked={t.floatingButton} onChange={(v) => set({ floatingButton: v })} />} />
         <Row title={tr("opt.selection")} subtitle={tr("opt.selectionHint")} chevron={false} right={<Switch checked={t.selectionTranslate} onChange={(v) => set({ selectionTranslate: v })} />} />
       </Group>
@@ -354,8 +354,8 @@ export function ChatSection({ settings, update }: Ctx) {
     <>
       <SectionLabel>{tr("opt.summaryTitle")}</SectionLabel>
       <Group>
-        <Row title={tr("opt.summaryLength")} chevron={false} right={<Segmented<SummaryLength> className="w-52" value={sm.length} onChange={(v) => setS({ length: v })} options={[{ value: "short", label: tr("len.short") }, { value: "medium", label: tr("len.medium") }, { value: "detailed", label: tr("len.long") }]} />} />
-        <Row title={tr("opt.summaryLang")} chevron={false} right={<Select className="w-44" value={sm.language} onChange={(v) => setS({ language: v })} options={[{ value: "target", label: tr("opt.summaryLangTarget") }, { value: "page", label: tr("opt.summaryLangPage") }, ...LANGUAGES.map((l) => ({ value: l.code, label: l.label }))]} />} />
+        <Row title={tr("opt.summaryLength")} chevron={false} right={<Segmented<SummaryLength> className="shrink-0" value={sm.length} onChange={(v) => setS({ length: v })} options={[{ value: "short", label: tr("len.short") }, { value: "medium", label: tr("len.medium") }, { value: "detailed", label: tr("len.long") }]} />} />
+        <Row title={tr("opt.summaryLang")} chevron={false} right={<Select className="w-36 shrink-0 sm:w-44" value={sm.language} onChange={(v) => setS({ language: v })} options={[{ value: "target", label: tr("opt.summaryLangTarget") }, { value: "page", label: tr("opt.summaryLangPage") }, ...LANGUAGES.map((l) => ({ value: l.code, label: l.label }))]} />} />
       </Group>
       <Hint>{tr("opt.summaryHint")}</Hint>
       <Advanced title={tr("opt.promptTemplates")} testId="prompt-templates">

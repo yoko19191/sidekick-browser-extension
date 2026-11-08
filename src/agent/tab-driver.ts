@@ -92,7 +92,7 @@ export class TabDriver implements PageDriver {
       await raceAbort(this.waitLoaded(), signal);
       return { ok: true, message: "went back" };
     }
-    if (typeof action.args.index === "string") await this.call({ type: "agent:highlight", index: action.args.index }).catch(() => {});
+    if (typeof action.args.index === "string") await this.call({ type: "agent:highlight", index: action.args.index, action: action.name }).catch(() => {});
     // On stop, tell the page to halt in-flight work (per-character typing) instead of finishing in the background.
     const onAbort = () => void this.call({ type: "agent:abort" }).catch(() => {});
     signal?.addEventListener("abort", onAbort, { once: true });

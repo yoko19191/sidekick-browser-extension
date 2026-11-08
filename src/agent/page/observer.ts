@@ -40,12 +40,33 @@ export class PageObserver {
   private mo?: MutationObserver;
   private lastIds = new Set<string>();
 
+  private recordMutations(recs: MutationRecord[]) {
+    const isIgnoredNode = (n: Node | null): boolean => {
+      for (let cur = n; cur; cur = cur.parentNode) {
+        if (cur.nodeType === 1) {
+          const el = cur as Element;
+          if (el.hasAttribute?.("data-sidekick-highlight") || el.tagName?.toLowerCase() === "sidekick-ui") return true;
+        }
+      }
+      return false;
+    };
+    for (const r of recs) {
+      if (isIgnoredNode(r.target)) continue;
+      let count = 0;
+      r.addedNodes.forEach((n) => {
+        if (!isIgnoredNode(n)) count++;
+      });
+      r.removedNodes.forEach((n) => {
+        if (!isIgnoredNode(n)) count++;
+      });
+      this.mutations += count;
+    }
+  }
+
   constructor(private readonly doc: Document, private readonly opts: ObserverOptions = {}) {
     const MO = doc.defaultView?.MutationObserver;
     if (MO) {
-      this.mo = new MO((recs) => {
-        for (const r of recs) this.mutations += r.addedNodes.length + r.removedNodes.length;
-      });
+      this.mo = new MO((recs) => this.recordMutations(recs));
       this.mo.observe(doc.documentElement, { childList: true, subtree: true });
     }
   }
@@ -134,7 +155,8 @@ export class PageObserver {
       const kids = (root as ParentNode).children;
       for (const el of Array.from(kids)) {
         const tag = el.tagName.toLowerCase();
-        if (["script", "style", "noscript", "template", "svg", "head"].includes(tag)) continue;
+        if (["script", "style", "noscript", "template", "svg", "head", "sidekick-ui"].includes(tag)) continue;
+        if (el.hasAttribute("data-sidekick-highlight")) continue;
         // A hidden checkbox/radio still counts when its visible label stands in for it.
         if (!visible(el) && !labelProxy(el)) continue;
         const pad = "  ".repeat(Math.min(depth, 6));
@@ -258,7 +280,7 @@ export class PageObserver {
   }
 
   domChanged(threshold = 40): boolean {
-    this.mo?.takeRecords().forEach((r) => (this.mutations += r.addedNodes.length + r.removedNodes.length));
+    if (this.mo) this.recordMutations(this.mo.takeRecords());
     return this.mutations >= threshold;
   }
 

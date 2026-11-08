@@ -199,11 +199,11 @@ export function SidebarSettings({
                 icon={Languages}
                 title={tr("opt.uiLocale")}
                 right={
-                  <Segmented<UiLocale>
+                  <Select
                     testId="settings-ui-locale"
-                    className="w-44"
+                    className="w-32 shrink-0"
                     value={settings.uiLocale ?? "auto"}
-                    onChange={(v) => update((s) => ({ ...s, uiLocale: v }))}
+                    onChange={(v) => update((s) => ({ ...s, uiLocale: v as UiLocale }))}
                     options={[
                       { value: "auto", label: tr("opt.uiLocaleAuto") },
                       { value: "zh", label: tr("opt.uiLocaleZh") },
@@ -218,7 +218,7 @@ export function SidebarSettings({
                 right={
                   <Segmented<ThemeMode>
                     testId="settings-theme"
-                    className="w-48"
+                    className="shrink-0"
                     value={settings.theme}
                     onChange={(v) => update((s) => ({ ...s, theme: v }))}
                     options={[
@@ -250,7 +250,7 @@ export function SidebarSettings({
                 right={
                   <Select
                     testId="qs-target-lang"
-                    className="w-36"
+                    className="w-32 shrink-0"
                     value={t.targetLang}
                     onChange={(v) => setT({ targetLang: v })}
                     options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
@@ -263,7 +263,7 @@ export function SidebarSettings({
                 right={
                   <Segmented<DisplayMode>
                     testId="qs-display-mode"
-                    className="w-40"
+                    className="shrink-0"
                     value={t.displayMode}
                     onChange={(v) => setT({ displayMode: v })}
                     options={[
@@ -446,16 +446,16 @@ function KimiRow({
 }) {
   const content = (
     <>
-      <Icon className="mt-0.5 size-[18px] shrink-0 text-foreground/80" strokeWidth={1.85} />
+      <Icon className={cn("size-[18px] shrink-0 text-foreground/80", subtitle ? "mt-0.5" : "")} strokeWidth={1.85} />
       <div className="min-w-0 flex-1 text-left">
-        <div className="text-[13.5px] font-medium leading-5 text-foreground">{title}</div>
+        <div className={cn("text-[13.5px] font-medium leading-5 text-foreground", !subtitle && "truncate")}>{title}</div>
         {subtitle && (
           <div className="mt-0.5 line-clamp-2 text-[12px] leading-4.5 text-muted-foreground">
             {subtitle}
           </div>
         )}
       </div>
-      {right ?? (onClick ? <ChevronRight className="size-4 shrink-0 text-muted-foreground" /> : null)}
+      {right ? <div className="shrink-0">{right}</div> : onClick ? <ChevronRight className="size-4 shrink-0 text-muted-foreground" /> : null}
     </>
   );
 
@@ -465,7 +465,7 @@ function KimiRow({
         type="button"
         onClick={onClick}
         data-testid={testId}
-        className="flex w-full items-center gap-3 py-3.5 text-left transition hover:opacity-85"
+        className="flex w-full items-center gap-2.5 py-3 text-left transition hover:opacity-85"
       >
         {content}
       </button>
@@ -473,7 +473,7 @@ function KimiRow({
   }
 
   return (
-    <div data-testid={testId} className="flex items-center gap-3 py-3.5">
+    <div data-testid={testId} className={cn("flex gap-2.5 py-3", subtitle ? "items-start" : "items-center")}>
       {content}
     </div>
   );

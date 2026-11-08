@@ -175,11 +175,13 @@ export async function dispatchBridgeMethod(
         let y = typeof args.y === "number" ? args.y : undefined;
         let label = "";
         if (typeof args.index === "string") {
-          const r = await chrome.tabs.sendMessage(tabId, { type: "agent:box", index: args.index, hover: true });
+          const r = await chrome.tabs.sendMessage(tabId, { type: "agent:box", index: args.index, hover: true, action: "hover" });
           if (!r?.ok || !r.data) throw new Error(`element ${args.index} not found`);
           x = r.data.x;
           y = r.data.y;
           label = ` ${args.index} (${r.data.tag})`;
+        } else if (x !== undefined && y !== undefined) {
+          await chrome.tabs.sendMessage(tabId, { type: "agent:highlight", x, y, action: "hover" }).catch(() => {});
         }
         if (x === undefined || y === undefined) throw new Error("hover requires either index or { x, y }");
         if (useCdp) {
@@ -193,13 +195,14 @@ export async function dispatchBridgeMethod(
       if (action.name === "click" && (useCdp || (typeof args.x === "number" && typeof args.y === "number"))) {
         if (typeof args.x === "number" && typeof args.y === "number") {
           if (!useCdp) throw new Error("Coordinate click { x, y } requires CDP Enhanced Mode to be enabled");
+          await chrome.tabs.sendMessage(tabId, { type: "agent:highlight", x: args.x, y: args.y, action: "click" }).catch(() => {});
           await cdpController.mouseClick(tabId, args.x, args.y);
           await new Promise((r) => setTimeout(r, 150));
           const snapshot = params.includeSnapshot !== false ? await driver.snapshot().catch(() => undefined) : undefined;
           return { tabId, ok: true, message: `clicked (${args.x}, ${args.y}) [CDP]`, snapshot };
         }
         if (typeof args.index === "string" && useCdp) {
-          const r = await chrome.tabs.sendMessage(tabId, { type: "agent:box", index: args.index });
+          const r = await chrome.tabs.sendMessage(tabId, { type: "agent:box", index: args.index, action: "click" });
           if (r?.ok && r.data && r.data.width > 0 && r.data.height > 0) {
             if (r.data.target === "_blank" && r.data.href && /^https?:\/\//i.test(r.data.href)) {
               const navRes = await driver.execute({ name: "navigate", args: { url: r.data.href } });
@@ -223,6 +226,7 @@ export async function dispatchBridgeMethod(
     case "page.screenshot": {
       const tab = await resolveTargetTab(params.tabId as number | undefined);
       if (!tab.id) throw new Error("No active tab");
+      await chrome.tabs.sendMessage(tab.id, { type: "agent:highlight", clear: true }).catch(() => {});
       if (useCdp) {
         const shot = await cdpController.captureScreenshot(tab.id, Boolean(params.fullPage));
         return {

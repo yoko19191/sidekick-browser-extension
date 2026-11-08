@@ -417,4 +417,13 @@ export const zh_CN = {
   "sb.version": "版本",
   "sb.styleAndPrompts": "译文样式与提示词",
   "sb.dataAndPrivacy": "数据、缓存与备份",
+  "hud.agentActive": "Sidekick Agent 正在操作页面",
+  "hud.inspecting": "正在感知页面结构…",
+  "hud.clicking": "正在点击 {target}",
+  "hud.hovering": "正在悬停 {target}",
+  "hud.typing": "正在输入 {target}",
+  "hud.scrolling": "正在滚动页面 ({dir})",
+  "hud.pressing": "正在按下按键 {key}",
+  "hud.selecting": "正在选择下拉项 {target}",
+  "hud.extracting": "正在提取页面内容…",
 } as const;

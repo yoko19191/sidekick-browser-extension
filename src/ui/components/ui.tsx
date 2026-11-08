@@ -106,13 +106,13 @@ export const Toggle = Switch;
 
 export function Segmented<T extends string>({ value, options, onChange, testId, className }: { value: T; options: { value: T; label: string; icon?: LucideIcon }[]; onChange: (v: T) => void; testId?: string; className?: string }) {
   return (
-    <div className={cn("flex rounded-btn bg-muted p-0.5", className)} data-testid={testId} role="radiogroup">
+    <div className={cn("inline-flex rounded-btn bg-muted p-0.5", className)} data-testid={testId} role="radiogroup">
       {options.map((o) => (
         <button key={o.value} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)} data-value={o.value}
-          className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[12.5px] font-medium transition-all",
+          className={cn("flex flex-auto items-center justify-center gap-1 whitespace-nowrap rounded-sm px-2.5 py-1 text-[12px] font-medium transition-all",
             value === o.value ? "bg-background text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06)]" : "text-muted-foreground hover:text-foreground")}>
-          {o.icon && <o.icon className="size-3.5" />}
-          {o.label}
+          {o.icon && <o.icon className="size-3.5 shrink-0" />}
+          <span>{o.label}</span>
         </button>
       ))}
     </div>
