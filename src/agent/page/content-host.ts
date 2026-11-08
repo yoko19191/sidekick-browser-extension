@@ -8,6 +8,7 @@ const get = () => (obs ??= new PageObserver(document));
 export type AgentPageMessage =
   | { type: "agent:snapshot" }
   | { type: "agent:describe"; index: string }
+  | { type: "agent:box"; index: string; hover?: boolean }
   | { type: "agent:execute"; action: ActionRequest }
   | { type: "agent:domChanged" }
   | { type: "agent:highlight"; index?: string }
@@ -36,6 +37,45 @@ export async function handleAgentMessage(msg: AgentPageMessage): Promise<{ ok: t
       return { ok: true, data: get().snapshot() };
     case "agent:describe":
       return { ok: true, data: get().describe(msg.index) ?? null };
+    case "agent:box": {
+      const el = get().element(msg.index);
+      if (!el) return { ok: true, data: null };
+      el.scrollIntoView?.({ block: "center", inline: "center" });
+      highlight(msg.index);
+      const r = el.getBoundingClientRect();
+      let offsetX = 0;
+      let offsetY = 0;
+      if (el.ownerDocument !== document) {
+        const frame = [...document.querySelectorAll("iframe, frame")].find(
+          (f) => (f as HTMLIFrameElement).contentDocument === el.ownerDocument,
+        );
+        if (frame) {
+          const fr = frame.getBoundingClientRect();
+          offsetX = fr.left;
+          offsetY = fr.top;
+        }
+      }
+      const x = Math.round(offsetX + r.left + r.width / 2);
+      const y = Math.round(offsetY + r.top + r.height / 2);
+      if (msg.hover) {
+        for (const type of [" pointerover", "pointerenter", "mouseover", "mouseenter", "mousemove"]) {
+          el.dispatchEvent(new MouseEvent(type.trim(), { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        }
+      }
+      return {
+        ok: true,
+        data: {
+          x,
+          y,
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 80),
+          href: (el as HTMLAnchorElement).href || undefined,
+          target: (el as HTMLAnchorElement).target || undefined,
+        },
+      };
+    }
     case "agent:execute":
       return { ok: true, data: await get().execute(msg.action) };
     case "agent:domChanged":

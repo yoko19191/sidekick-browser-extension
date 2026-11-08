@@ -489,7 +489,7 @@ const MCP_TOOL_GROUPS = [
     labelKey: "mcp.catInspect" as const,
     tools: [
       { name: "browser_snapshot", sig: "{ tabId? }", descKey: "mcp.tool.browser_snapshot" as const },
-      { name: "browser_screenshot", sig: "{ tabId? }", descKey: "mcp.tool.browser_screenshot" as const },
+      { name: "browser_screenshot", sig: "{ tabId?, fullPage? }", descKey: "mcp.tool.browser_screenshot" as const },
       { name: "browser_extract", sig: "{ tabId? }", descKey: "mcp.tool.browser_extract" as const },
       { name: "browser_search_page", sig: "{ pattern, tabId? }", descKey: "mcp.tool.browser_search_page" as const },
     ],
@@ -497,7 +497,8 @@ const MCP_TOOL_GROUPS = [
   {
     labelKey: "mcp.catInteract" as const,
     tools: [
-      { name: "browser_click", sig: "{ index, tabId? }", descKey: "mcp.tool.browser_click" as const },
+      { name: "browser_click", sig: "{ index | x,y }", descKey: "mcp.tool.browser_click" as const },
+      { name: "browser_hover", sig: "{ index | x,y }", descKey: "mcp.tool.browser_hover" as const },
       { name: "browser_input", sig: "{ index, text, clear? }", descKey: "mcp.tool.browser_input" as const },
       { name: "browser_select_option", sig: "{ index, text }", descKey: "mcp.tool.browser_select_option" as const },
       { name: "browser_scroll", sig: "{ down, pages?, index? }", descKey: "mcp.tool.browser_scroll" as const },
@@ -514,6 +515,14 @@ const MCP_TOOL_GROUPS = [
       { name: "browser_navigate", sig: "{ url, tabId? }", descKey: "mcp.tool.browser_navigate" as const },
       { name: "browser_go_back", sig: "{ tabId? }", descKey: "mcp.tool.browser_go_back" as const },
       { name: "browser_wait", sig: "{ seconds, tabId? }", descKey: "mcp.tool.browser_wait" as const },
+    ],
+  },
+  {
+    labelKey: "mcp.catCdp" as const,
+    tools: [
+      { name: "browser_console_logs", sig: "{ level?, clear? }", descKey: "mcp.tool.browser_console_logs" as const },
+      { name: "browser_network_requests", sig: "{ urlFilter?, onlyErrors? }", descKey: "mcp.tool.browser_network_requests" as const },
+      { name: "browser_evaluate", sig: "{ expression, tabId? }", descKey: "mcp.tool.browser_evaluate" as const },
     ],
   },
   {
@@ -566,6 +575,18 @@ function McpBridgeCard() {
     const s = await bg<McpBridgeStatus>({
       type: "mcp:config",
       config: { enabled, port: Number(portInput) || DEFAULT_MCP_PORT, token: tokenInput.trim() },
+    });
+    if (s) setStatus(s);
+  };
+
+  const toggleCdp = async (cdpEnabled: boolean) => {
+    if (cdpEnabled) {
+      const granted = await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false);
+      if (!granted) return;
+    }
+    const s = await bg<McpBridgeStatus>({
+      type: "mcp:config",
+      config: { cdpEnabled },
     });
     if (s) setStatus(s);
   };
@@ -704,6 +725,22 @@ function McpBridgeCard() {
       <div className="mt-4 grid grid-cols-2 gap-3">
         <TextField label={tr("mcp.port")} value={portInput} onChange={setPortInput} mono testId="mcp-port" />
         <TextField label={tr("mcp.token")} value={tokenInput} onChange={setTokenInput} placeholder={tr("mcp.tokenPlaceholder")} mono testId="mcp-token" />
+      </div>
+
+      {/* Optional CDP Enhanced Mode toggle (default off) */}
+      <div className="mt-4 flex items-center justify-between gap-4 rounded-[12px] border border-border/60 bg-background/60 px-3.5 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[13.5px] font-semibold text-foreground">{tr("mcp.cdpTitle")}</span>
+            {status.cdpEnabled && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                {tr("mcp.cdpBadge")}
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">{tr("mcp.cdpDesc")}</p>
+        </div>
+        <Switch testId="mcp-cdp-enable" checked={Boolean(status.cdpEnabled)} onChange={toggleCdp} label={tr("mcp.cdpTitle")} />
       </div>
 
       {/* Categorized MCP Tool pills with aligned 2-column grid & hover tooltips */}

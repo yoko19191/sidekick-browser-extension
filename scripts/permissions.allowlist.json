@@ -1,6 +1,6 @@
 {
   "permissions": ["activeTab", "contextMenus", "scripting", "sidePanel", "storage"],
-  "optional_permissions": ["userScripts"],
+  "optional_permissions": ["debugger", "userScripts"],
   "host_permissions": [],
   "optional_host_permissions": ["<all_urls>"]
 }

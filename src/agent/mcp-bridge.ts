@@ -3,6 +3,7 @@
  * Connects outbound from the MV3 service worker to the local Sidekick MCP server over WebSocket
  * (`ws://127.0.0.1:<port>/ws`) and dispatches browser inspection & action RPCs to `TabDriver`.
  */
+import { cdpController, hasDebuggerPermission } from "./cdp";
 import { WebAgent } from "./loop";
 import { isRestrictedUrl, siteOf } from "./risk";
 import { agentStore } from "./store";
@@ -20,11 +21,14 @@ export interface McpBridgeConfig {
   enabled: boolean;
   port: number;
   token: string;
+  /** Optional CDP Enhanced Mode via `chrome.debugger` (default false). */
+  cdpEnabled?: boolean;
 }
 
 export interface McpBridgeStatus extends McpBridgeConfig {
   connected: boolean;
   indicator?: McpIndicatorState;
+  cdpAttachedTabs?: number[];
   lastError?: string;
   lastCommandAt?: number;
   lastTool?: string;
@@ -41,7 +45,8 @@ export function normalizeBridgeConfig(raw: unknown): McpBridgeConfig {
   const portNum = Number(obj.port);
   const port = Number.isInteger(portNum) && portNum >= 1024 && portNum <= 65535 ? portNum : DEFAULT_MCP_PORT;
   const token = typeof obj.token === "string" ? obj.token.trim() : "";
-  return { enabled, port, token };
+  const cdpEnabled = typeof obj.cdpEnabled === "boolean" ? obj.cdpEnabled : false;
+  return { enabled, port, token, cdpEnabled };
 }
 
 export async function loadBridgeConfig(): Promise<McpBridgeConfig> {
@@ -93,7 +98,9 @@ export async function dispatchBridgeMethod(
   method: string,
   params: Record<string, unknown>,
   deps: BridgeDeps,
+  cfg?: McpBridgeConfig,
 ): Promise<unknown> {
+  const useCdp = Boolean(cfg?.cdpEnabled && (await hasDebuggerPermission()));
   switch (method) {
     case "ping":
       return { pong: true, ts: Date.now() };
@@ -157,10 +164,57 @@ export async function dispatchBridgeMethod(
     case "page.action": {
       const tab = await resolveTargetTab(params.tabId as number | undefined);
       const tabId = await assertTabAllowed(tab, deps.ensureInjected);
-      const action = params.action as ActionRequest | undefined;
+      const action = params.action as { name: string; args?: Record<string, unknown> } | undefined;
       if (!action?.name) throw new Error("Missing action.name");
+      const args = action.args ?? {};
       const driver = new TabDriver(tabId, deps.ensureInjected);
-      const result = await driver.execute({ name: action.name, args: action.args ?? {} });
+
+      // Hover action (supported in both standard and CDP enhanced mode)
+      if (action.name === "hover") {
+        let x = typeof args.x === "number" ? args.x : undefined;
+        let y = typeof args.y === "number" ? args.y : undefined;
+        let label = "";
+        if (typeof args.index === "string") {
+          const r = await chrome.tabs.sendMessage(tabId, { type: "agent:box", index: args.index, hover: true });
+          if (!r?.ok || !r.data) throw new Error(`element ${args.index} not found`);
+          x = r.data.x;
+          y = r.data.y;
+          label = ` ${args.index} (${r.data.tag})`;
+        }
+        if (x === undefined || y === undefined) throw new Error("hover requires either index or { x, y }");
+        if (useCdp) {
+          await cdpController.mouseHover(tabId, x, y);
+        }
+        const snapshot = params.includeSnapshot !== false ? await driver.snapshot().catch(() => undefined) : undefined;
+        return { tabId, ok: true, message: `hovered${label} at (${x}, ${y})${useCdp ? " [CDP]" : ""}`, snapshot };
+      }
+
+      // Coordinate click or CDP-enhanced trusted click
+      if (action.name === "click" && (useCdp || (typeof args.x === "number" && typeof args.y === "number"))) {
+        if (typeof args.x === "number" && typeof args.y === "number") {
+          if (!useCdp) throw new Error("Coordinate click { x, y } requires CDP Enhanced Mode to be enabled");
+          await cdpController.mouseClick(tabId, args.x, args.y);
+          await new Promise((r) => setTimeout(r, 150));
+          const snapshot = params.includeSnapshot !== false ? await driver.snapshot().catch(() => undefined) : undefined;
+          return { tabId, ok: true, message: `clicked (${args.x}, ${args.y}) [CDP]`, snapshot };
+        }
+        if (typeof args.index === "string" && useCdp) {
+          const r = await chrome.tabs.sendMessage(tabId, { type: "agent:box", index: args.index });
+          if (r?.ok && r.data && r.data.width > 0 && r.data.height > 0) {
+            if (r.data.target === "_blank" && r.data.href && /^https?:\/\//i.test(r.data.href)) {
+              const navRes = await driver.execute({ name: "navigate", args: { url: r.data.href } });
+              const snapshot = params.includeSnapshot !== false ? await driver.snapshot().catch(() => undefined) : undefined;
+              return { tabId, ...navRes, snapshot };
+            }
+            await cdpController.mouseClick(tabId, r.data.x, r.data.y);
+            await new Promise((res) => setTimeout(res, 150));
+            const snapshot = params.includeSnapshot !== false ? await driver.snapshot().catch(() => undefined) : undefined;
+            return { tabId, ok: true, message: `clicked ${args.index} at (${r.data.x}, ${r.data.y}) [CDP]`, snapshot };
+          }
+        }
+      }
+
+      const result = await driver.execute({ name: action.name as ActionRequest["name"], args });
       const includeSnapshot = params.includeSnapshot !== false;
       const snapshot = includeSnapshot ? await driver.snapshot().catch(() => undefined) : undefined;
       return { tabId, ...result, snapshot };
@@ -169,6 +223,17 @@ export async function dispatchBridgeMethod(
     case "page.screenshot": {
       const tab = await resolveTargetTab(params.tabId as number | undefined);
       if (!tab.id) throw new Error("No active tab");
+      if (useCdp) {
+        const shot = await cdpController.captureScreenshot(tab.id, Boolean(params.fullPage));
+        return {
+          tabId: tab.id,
+          url: tab.url ?? "",
+          title: tab.title ?? "",
+          mimeType: shot.mimeType,
+          base64: shot.base64,
+          cdp: true,
+        };
+      }
       if (!tab.active) {
         await chrome.tabs.update(tab.id, { active: true });
         await new Promise((r) => setTimeout(r, 120));
@@ -183,6 +248,45 @@ export async function dispatchBridgeMethod(
         mimeType: "image/jpeg",
         base64,
       };
+    }
+
+    case "cdp.console": {
+      if (!cfg?.cdpEnabled) {
+        throw new Error("CDP Enhanced Mode is disabled. Turn on 'CDP Enhanced Mode' in Sidekick Settings -> Web Bridge.");
+      }
+      const tab = await resolveTargetTab(params.tabId as number | undefined);
+      const tabId = await assertTabAllowed(tab, deps.ensureInjected);
+      const logs = await cdpController.getConsoleLogs(tabId, {
+        level: params.level as string | undefined,
+        clear: Boolean(params.clear),
+      });
+      return { tabId, logs };
+    }
+
+    case "cdp.network": {
+      if (!cfg?.cdpEnabled) {
+        throw new Error("CDP Enhanced Mode is disabled. Turn on 'CDP Enhanced Mode' in Sidekick Settings -> Web Bridge.");
+      }
+      const tab = await resolveTargetTab(params.tabId as number | undefined);
+      const tabId = await assertTabAllowed(tab, deps.ensureInjected);
+      const requests = await cdpController.getNetworkRequests(tabId, {
+        urlFilter: params.urlFilter as string | undefined,
+        onlyErrors: Boolean(params.onlyErrors),
+        clear: Boolean(params.clear),
+      });
+      return { tabId, requests };
+    }
+
+    case "cdp.evaluate": {
+      if (!cfg?.cdpEnabled) {
+        throw new Error("CDP Enhanced Mode is disabled. Turn on 'CDP Enhanced Mode' in Sidekick Settings -> Web Bridge.");
+      }
+      const tab = await resolveTargetTab(params.tabId as number | undefined);
+      const tabId = await assertTabAllowed(tab, deps.ensureInjected);
+      const expression = String(params.expression ?? "");
+      if (!expression.trim()) throw new Error("expression is required");
+      const out = await cdpController.evaluate(tabId, expression);
+      return { tabId, ...out };
     }
 
     case "agent.run_task": {
@@ -348,6 +452,7 @@ export class McpBridgeClient {
       ...this.cfg,
       connected: this.connected,
       indicator,
+      cdpAttachedTabs: cdpController.getAttachedTabs(),
       lastError: this.lastError,
       lastCommandAt: this.lastCommandAt,
       lastTool: this.lastTool,
@@ -356,9 +461,13 @@ export class McpBridgeClient {
 
   async configure(patch: Partial<McpBridgeConfig>): Promise<McpBridgeStatus> {
     const next = await saveBridgeConfig({ ...this.cfg, ...patch });
-    const changed = next.enabled !== this.cfg.enabled || next.port !== this.cfg.port || next.token !== this.cfg.token;
+    const wsChanged = next.enabled !== this.cfg.enabled || next.port !== this.cfg.port || next.token !== this.cfg.token;
+    const cdpTurnedOff = (this.cfg.cdpEnabled && !next.cdpEnabled) || !next.enabled;
     this.cfg = next;
-    if (changed) {
+    if (cdpTurnedOff) {
+      await cdpController.detachAll();
+    }
+    if (wsChanged) {
       this.disconnect();
       if (this.cfg.enabled) this.connect();
       else this.syncIndicator();
@@ -457,7 +566,7 @@ export class McpBridgeClient {
           this.lastError = undefined;
           this.syncIndicator();
           try {
-            const result = await dispatchBridgeMethod(msg.method, msg.params ?? {}, this.deps);
+            const result = await dispatchBridgeMethod(msg.method, msg.params ?? {}, this.deps, this.cfg);
             this.inflight = Math.max(0, this.inflight - 1);
             this.markActiveHold();
             this.syncIndicator();

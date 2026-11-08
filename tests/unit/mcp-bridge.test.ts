@@ -9,16 +9,19 @@ describe("MCP Browser Bridge", () => {
       enabled: false,
       port: DEFAULT_MCP_PORT,
       token: "",
+      cdpEnabled: false,
     });
-    expect(normalizeBridgeConfig({ enabled: true, port: 18888, token: " secret " })).toEqual({
+    expect(normalizeBridgeConfig({ enabled: true, port: 18888, token: " secret ", cdpEnabled: true })).toEqual({
       enabled: true,
       port: 18888,
       token: "secret",
+      cdpEnabled: true,
     });
     expect(normalizeBridgeConfig({ enabled: "yes", port: 80 })).toEqual({
       enabled: false,
       port: DEFAULT_MCP_PORT,
       token: "",
+      cdpEnabled: false,
     });
   });
 
@@ -42,10 +45,14 @@ describe("MCP Browser Bridge", () => {
       expect.arrayContaining([
         "browser_snapshot",
         "browser_click",
+        "browser_hover",
         "browser_input",
         "browser_extract",
         "browser_screenshot",
         "browser_tabs_list",
+        "browser_console_logs",
+        "browser_network_requests",
+        "browser_evaluate",
         "browser_run_task",
       ]),
     );
@@ -74,6 +81,15 @@ describe("MCP Browser Bridge", () => {
           base64: "dGVzdC1pbWFnZQ==",
         };
       }
+      if (method === "cdp.console") {
+        return { tabId: 1, logs: [{ level: "error", text: "Boom", ts: 1700000000000 }] };
+      }
+      if (method === "cdp.network") {
+        return { tabId: 1, requests: [{ requestId: "r1", method: "GET", url: "https://api.example.com/v1", status: 200, resourceType: "Fetch", startedAt: 1 }] };
+      }
+      if (method === "cdp.evaluate") {
+        return { tabId: 1, value: { title: "Evaluated" } };
+      }
       return {};
     };
 
@@ -85,12 +101,21 @@ describe("MCP Browser Bridge", () => {
     expect(clickOut.content[0].text).toContain("clicked [f0:12]");
     expect(clickOut.content[0].text).toContain("[f0:12] <button>Clicked</button>");
 
-    const shotOut = await executeMcpToolCall("browser_screenshot", {}, mockCallExt);
+    const shotOut = await executeMcpToolCall("browser_screenshot", { fullPage: true }, mockCallExt);
     expect(shotOut.content[1]).toEqual({
       type: "image",
       data: "dGVzdC1pbWFnZQ==",
       mimeType: "image/jpeg",
     });
+
+    const consoleOut = await executeMcpToolCall("browser_console_logs", { clear: true }, mockCallExt);
+    expect(consoleOut.content[0].text).toContain('"text": "Boom"');
+
+    const netOut = await executeMcpToolCall("browser_network_requests", {}, mockCallExt);
+    expect(netOut.content[0].text).toContain("https://api.example.com/v1");
+
+    const evalOut = await executeMcpToolCall("browser_evaluate", { expression: "document.title" }, mockCallExt);
+    expect(evalOut.content[0].text).toContain('"title": "Evaluated"');
   });
 
   it("exposes HTTP /status on the local bridge server", async () => {

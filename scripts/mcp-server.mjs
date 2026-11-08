@@ -74,24 +74,41 @@ export const MCP_TOOLS = [
   },
   {
     name: "browser_screenshot",
-    description: "Capture a visual JPEG screenshot of the currently visible browser tab.",
+    description: "Capture a visual JPEG screenshot of the browser tab (supports fullPage and background tabs when CDP Mode is enabled).",
     inputSchema: {
       type: "object",
       properties: {
         tabId: { type: "number", description: "Optional tabId; defaults to the currently active tab" },
+        fullPage: { type: "boolean", description: "Capture full scrollable page height (requires CDP Enhanced Mode)" },
       },
     },
   },
   {
     name: "browser_click",
-    description: 'Click an element on the page by its index from browser_snapshot (e.g. "f0:12"). Returns the updated DOM snapshot.',
+    description:
+      'Click an element by its index from browser_snapshot (e.g. "f0:12") or by viewport coordinates { x, y } (when CDP Mode is enabled). Returns the updated DOM snapshot.',
     inputSchema: {
       type: "object",
       properties: {
         index: { type: "string", description: 'Element id from browser_snapshot, e.g. "f0:12"' },
+        x: { type: "number", description: "Optional viewport X coordinate (CDP Mode)" },
+        y: { type: "number", description: "Optional viewport Y coordinate (CDP Mode)" },
         tabId: { type: "number", description: "Optional tabId" },
       },
-      required: ["index"],
+    },
+  },
+  {
+    name: "browser_hover",
+    description:
+      'Hover the mouse cursor over an element by index (e.g. "f0:12") or coordinates { x, y } to trigger hover menus or tooltips.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        index: { type: "string", description: 'Element id from browser_snapshot, e.g. "f0:12"' },
+        x: { type: "number", description: "Optional viewport X coordinate" },
+        y: { type: "number", description: "Optional viewport Y coordinate" },
+        tabId: { type: "number", description: "Optional tabId" },
+      },
     },
   },
   {
@@ -211,6 +228,46 @@ export const MCP_TOOLS = [
       required: ["task"],
     },
   },
+  {
+    name: "browser_console_logs",
+    description:
+      "Read captured browser Console logs and uncaught JS exceptions from the tab (requires CDP Enhanced Mode enabled in Web Bridge settings).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        level: { type: "string", description: "Optional filter: log, warn, error, info, exception" },
+        clear: { type: "boolean", description: "Clear buffered console logs after reading" },
+        tabId: { type: "number", description: "Optional tabId" },
+      },
+    },
+  },
+  {
+    name: "browser_network_requests",
+    description:
+      "Read captured HTTP/XHR/Fetch network requests and status codes from the tab (requires CDP Enhanced Mode enabled in Web Bridge settings).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        urlFilter: { type: "string", description: "Optional substring filter on request URL" },
+        onlyErrors: { type: "boolean", description: "Only return failed requests or HTTP status >= 400" },
+        clear: { type: "boolean", description: "Clear buffered network entries after reading" },
+        tabId: { type: "number", description: "Optional tabId" },
+      },
+    },
+  },
+  {
+    name: "browser_evaluate",
+    description:
+      "Evaluate a JavaScript expression in the page context via CDP Runtime.evaluate (requires CDP Enhanced Mode enabled in Web Bridge settings).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        expression: { type: "string", description: "JavaScript expression to evaluate in the page" },
+        tabId: { type: "number", description: "Optional tabId" },
+      },
+      required: ["expression"],
+    },
+  },
 ];
 
 /** Encode a UTF-8 string into an unmasked RFC 6455 WebSocket text frame (server -> client). */
@@ -315,7 +372,7 @@ export async function executeMcpToolCall(name, args = {}, callExtension) {
       return { content: [{ type: "text", text: header + (r.markdown || "") }] };
     }
     case "browser_screenshot": {
-      const r = await callExtension("page.screenshot", { tabId });
+      const r = await callExtension("page.screenshot", { tabId, fullPage: Boolean(args.fullPage) });
       return {
         content: [
           { type: "text", text: `Screenshot of ${r.title || "tab"} (${r.url || ""})` },
@@ -324,6 +381,7 @@ export async function executeMcpToolCall(name, args = {}, callExtension) {
       };
     }
     case "browser_click":
+    case "browser_hover":
     case "browser_input":
     case "browser_select_option":
     case "browser_scroll":
@@ -342,6 +400,30 @@ export async function executeMcpToolCall(name, args = {}, callExtension) {
       return {
         isError: r.ok === false,
         content: [{ type: "text", text: formatSnapshotResult(r) }],
+      };
+    }
+    case "browser_console_logs": {
+      const r = await callExtension("cdp.console", { tabId, level: args.level, clear: args.clear });
+      return { content: [{ type: "text", text: JSON.stringify(r.logs ?? [], null, 2) }] };
+    }
+    case "browser_network_requests": {
+      const r = await callExtension("cdp.network", {
+        tabId,
+        urlFilter: args.urlFilter,
+        onlyErrors: args.onlyErrors,
+        clear: args.clear,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(r.requests ?? [], null, 2) }] };
+    }
+    case "browser_evaluate": {
+      const r = await callExtension("cdp.evaluate", { tabId, expression: args.expression });
+      if (r.error) {
+        return { isError: true, content: [{ type: "text", text: `Evaluation error: ${r.error}` }] };
+      }
+      return {
+        content: [
+          { type: "text", text: typeof r.value === "string" ? r.value : JSON.stringify(r.value, null, 2) ?? "undefined" },
+        ],
       };
     }
     case "browser_run_task": {
