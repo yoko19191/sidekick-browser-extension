@@ -52,8 +52,7 @@ const KEY_DEFS: Record<string, { key: string; code: string; keyCode: number; tex
 };
 
 export async function hasDebuggerPermission(): Promise<boolean> {
-  if (!globalThis.chrome?.permissions?.contains) return false;
-  return chrome.permissions.contains({ permissions: ["debugger"] }).catch(() => false);
+  return Boolean(globalThis.chrome?.debugger?.attach);
 }
 
 export class CdpController {

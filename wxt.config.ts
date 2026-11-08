@@ -33,8 +33,8 @@ export default defineConfig({
     short_name: "__MSG_extShortName__",
     description: "__MSG_extDescription__",
     default_locale: "zh_CN",
-    permissions: ["sidePanel", "storage", "activeTab", "scripting", "contextMenus"],
-    optional_permissions: ["debugger" as unknown as "userScripts", "userScripts"],
+    permissions: ["sidePanel", "storage", "activeTab", "scripting", "contextMenus", "debugger"],
+    optional_permissions: ["userScripts"],
     optional_host_permissions: ["<all_urls>"],
     action: { default_title: "__MSG_actionTitle__" },
     commands: {

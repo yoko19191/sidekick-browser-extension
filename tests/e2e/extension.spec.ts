@@ -27,10 +27,10 @@ test.afterAll(async () => {
 });
 
 test.describe.serial("翻翻 Sidekick v1", () => {
-  test("manifest permissions are minimal (no userScripts / debugger)", async () => {
+  test("manifest permissions are minimal (no userScripts)", async () => {
     const panel = await openPanel();
     const m = await panel.evaluate(() => chrome.runtime.getManifest());
-    expect(m.permissions?.sort()).toEqual(["activeTab", "contextMenus", "scripting", "sidePanel", "storage"]);
+    expect(m.permissions?.sort()).toEqual(["activeTab", "contextMenus", "debugger", "scripting", "sidePanel", "storage"]);
     expect(m.optional_host_permissions).toEqual(["<all_urls>"]);
     await panel.close();
   });

@@ -580,10 +580,6 @@ function McpBridgeCard() {
   };
 
   const toggleCdp = async (cdpEnabled: boolean) => {
-    if (cdpEnabled) {
-      const granted = await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false);
-      if (!granted) return;
-    }
     const s = await bg<McpBridgeStatus>({
       type: "mcp:config",
       config: { cdpEnabled },
