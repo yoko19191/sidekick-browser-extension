@@ -597,15 +597,17 @@ function McpBridgeCard() {
   };
 
   const mcpSnippet = () => {
-    const args = ["scripts/mcp-server.mjs", `--port=${status.port}`];
-    if (status.token) args.push(`--token=${status.token}`);
+    const entry: Record<string, unknown> = {
+      type: "streamable-http",
+      url: `http://127.0.0.1:${status.port}/mcp`,
+    };
+    if (status.token) {
+      entry.headers = { Authorization: `Bearer ${status.token}` };
+    }
     return JSON.stringify(
       {
         mcpServers: {
-          "sidekick-browser": {
-            command: "node",
-            args,
-          },
+          "sidekick-browser": entry,
         },
       },
       null,

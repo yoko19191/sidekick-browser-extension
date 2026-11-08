@@ -471,13 +471,42 @@ export function createBridgeServer({ port = DEFAULT_PORT, token = "" } = {}) {
     });
   }
 
+  const CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID, x-sidekick-token",
+    "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version",
+  };
+
+  function isAuthorized(req, url) {
+    if (!token) return true;
+    const authHeader = String(req.headers["authorization"] || "");
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    return (
+      req.headers["x-sidekick-token"] === token ||
+      bearer === token ||
+      url.searchParams.get("token") === token
+    );
+  }
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://127.0.0.1:${port}`);
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS_HEADERS);
+      res.end();
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/status") {
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(200, { ...CORS_HEADERS, "content-type": "application/json; charset=utf-8" });
       res.end(
         JSON.stringify({
           ok: true,
+          transport: "streamable-http",
+          stateless: true,
+          endpoint: `http://127.0.0.1:${port}/mcp`,
           extensionConnected: Boolean(activeSocket && !activeSocket.destroyed),
           port,
           tools: MCP_TOOLS.map((t) => t.name),
@@ -485,9 +514,94 @@ export function createBridgeServer({ port = DEFAULT_PORT, token = "" } = {}) {
       );
       return;
     }
+
+    // Stateless Streamable HTTP MCP endpoint (/mcp and /)
+    if (url.pathname === "/mcp" || url.pathname === "/") {
+      if (!isAuthorized(req, url)) {
+        res.writeHead(401, { ...CORS_HEADERS, "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized token" } }));
+        return;
+      }
+
+      // Per MCP Streamable HTTP (2025-03-26) Stateless spec:
+      // Standalone GET SSE streams and DELETE session termination return 405 Method Not Allowed.
+      if (req.method === "GET" || req.method === "DELETE") {
+        res.writeHead(405, { ...CORS_HEADERS, Allow: "POST, OPTIONS", "content-type": "application/json; charset=utf-8" });
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32000, message: "Method Not Allowed: Stateless Streamable HTTP MCP server only accepts POST requests." },
+          }),
+        );
+        return;
+      }
+
+      if (req.method === "POST") {
+        const chunks = [];
+        for await (const c of req) chunks.push(c);
+        let body;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          res.writeHead(400, { ...CORS_HEADERS, "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }));
+          return;
+        }
+
+        const accept = String(req.headers["accept"] || "");
+        const prefersSseOnly =
+          accept.includes("text/event-stream") && !accept.includes("application/json") && !accept.includes("*/*");
+
+        if (Array.isArray(body)) {
+          const results = (await Promise.all(body.map((msg) => handleMcpJsonRpc(msg, callExtension)))).filter(Boolean);
+          if (results.length === 0) {
+            res.writeHead(202, CORS_HEADERS);
+            res.end();
+            return;
+          }
+          if (prefersSseOnly) {
+            res.writeHead(200, {
+              ...CORS_HEADERS,
+              "content-type": "text/event-stream; charset=utf-8",
+              "cache-control": "no-cache",
+            });
+            for (const item of results) {
+              res.write(`event: message\ndata: ${JSON.stringify(item)}\n\n`);
+            }
+            res.end();
+            return;
+          }
+          res.writeHead(200, { ...CORS_HEADERS, "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify(results));
+          return;
+        }
+
+        const rpcRes = await handleMcpJsonRpc(body, callExtension);
+        if (!rpcRes) {
+          // Notification (e.g. notifications/initialized) or client response -> 202 Accepted
+          res.writeHead(202, CORS_HEADERS);
+          res.end();
+          return;
+        }
+        if (prefersSseOnly) {
+          res.writeHead(200, {
+            ...CORS_HEADERS,
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache",
+          });
+          res.end(`event: message\ndata: ${JSON.stringify(rpcRes)}\n\n`);
+          return;
+        }
+        res.writeHead(200, { ...CORS_HEADERS, "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(rpcRes));
+        return;
+      }
+    }
+
     if (req.method === "POST" && url.pathname === "/rpc") {
-      if (token && req.headers["x-sidekick-token"] !== token && url.searchParams.get("token") !== token) {
-        res.writeHead(401, { "content-type": "application/json" });
+      if (!isAuthorized(req, url)) {
+        res.writeHead(401, { ...CORS_HEADERS, "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: "Unauthorized token" }));
         return;
       }
@@ -634,7 +748,7 @@ export async function handleMcpJsonRpc(msg, callExtension) {
           jsonrpc: "2.0",
           id,
           result: {
-            protocolVersion: params?.protocolVersion || "2024-11-05",
+            protocolVersion: params?.protocolVersion || "2025-03-26",
             capabilities: { tools: {} },
             serverInfo: { name: "sidekick-browser-bridge", version: "0.1.0" },
           },
@@ -687,7 +801,9 @@ async function main() {
   let callFn = bridge.callExtension;
   try {
     await bridge.listen(port);
-    process.stderr.write(`[sidekick-mcp] Bridge listening on ws://127.0.0.1:${port}/ws (HTTP /status, /rpc)\n`);
+    process.stderr.write(
+      `[sidekick-mcp] Stateless Streamable HTTP MCP listening on http://127.0.0.1:${port}/mcp (Extension WS: ws://127.0.0.1:${port}/ws)\n`,
+    );
   } catch (e) {
     process.stderr.write(`[sidekick-mcp] Port ${port} already active (${e.code || e.message}); proxying via http://127.0.0.1:${port}/rpc\n`);
     callFn = async (method, params = {}) => {

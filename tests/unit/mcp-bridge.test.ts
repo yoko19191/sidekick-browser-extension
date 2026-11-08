@@ -118,15 +118,43 @@ describe("MCP Browser Bridge", () => {
     expect(evalOut.content[0].text).toContain('"title": "Evaluated"');
   });
 
-  it("exposes HTTP /status on the local bridge server", async () => {
+  it("exposes HTTP /status and Stateless Streamable HTTP /mcp on the local bridge server", async () => {
     const bridge = createBridgeServer({ port: 0 });
     const boundPort = await bridge.listen(0);
     try {
       const res = await fetch(`http://127.0.0.1:${boundPort}/status`);
-      const json = (await res.json()) as { ok: boolean; extensionConnected: boolean; tools: string[] };
+      const json = (await res.json()) as { ok: boolean; transport: string; stateless: boolean; extensionConnected: boolean; tools: string[] };
       expect(json.ok).toBe(true);
+      expect(json.transport).toBe("streamable-http");
+      expect(json.stateless).toBe(true);
       expect(json.extensionConnected).toBe(false);
       expect(json.tools).toContain("browser_snapshot");
+
+      // Stateless Streamable HTTP POST /mcp initialize
+      const initHttp = await fetch(`http://127.0.0.1:${boundPort}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } }),
+      });
+      expect(initHttp.status).toBe(200);
+      const initBody = (await initHttp.json()) as { result: { protocolVersion: string; serverInfo: { name: string } } };
+      expect(initBody.result.protocolVersion).toBe("2025-03-26");
+      expect(initBody.result.serverInfo.name).toBe("sidekick-browser-bridge");
+
+      // Stateless Streamable HTTP POST /mcp notification -> 202 Accepted
+      const notifHttp = await fetch(`http://127.0.0.1:${boundPort}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      });
+      expect(notifHttp.status).toBe(202);
+
+      // Stateless Streamable HTTP GET /mcp -> 405 Method Not Allowed
+      const getHttp = await fetch(`http://127.0.0.1:${boundPort}/mcp`, {
+        method: "GET",
+        headers: { Accept: "text/event-stream" },
+      });
+      expect(getHttp.status).toBe(405);
     } finally {
       await bridge.close();
     }
