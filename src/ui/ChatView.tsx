@@ -1,5 +1,5 @@
 import {
-  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, RotateCcw, ScanText, Settings2, Square, Sun, TextQuote, Trash2, X,
+  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, Plus, RotateCcw, ScanText, Settings2, Square, Sun, TextQuote, Trash2, X,
 } from "lucide-react";
 import { AgentRun } from "./AgentRun";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,7 +8,7 @@ import { ConversationStore, type Conversation } from "@/src/lib/db";
 import { DEFAULT_KEYPOINTS_TEMPLATE, deriveChatTitle, displayPageTitle } from "@/src/lib/prompts";
 import { keyOptional, modelRef, resolveModelRef } from "@/src/lib/providers";
 import { langLabel } from "@/src/lib/settings";
-import type { ChatTurn, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
+import { LONG_TEXT_PASTE_THRESHOLD, type ChatAttachment, type ChatTurn, type ProviderConfig, type Settings, type TranslateState } from "@/src/lib/types";
 import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, useToast } from "./components/ui";
 import { ProviderIcon } from "./components/ProviderIcon";
 import { Mascot, type MascotState } from "./mascot/Mascot";
@@ -35,6 +35,28 @@ interface Msg extends ChatTurn {
 
 const store = new ConversationStore();
 const newId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export function formatPastedFileName(ext: string, prefix = "pasted", d = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ymd = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  const hms = `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${prefix}-${ymd}-${hms}.${ext.replace(/^\./, "")}`;
+}
+
+function fileToDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
 
 interface ConvEntry {
   id: string;
@@ -71,6 +93,9 @@ export function ChatView({
     [tabKey],
   );
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [previewAtt, setPreviewAtt] = useState<ChatAttachment | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [usePage, setUsePage] = useState(true);
   const [busy, setBusy] = useState<{ abort: () => void } | null>(null);
   const page = usePageContent(tab);
@@ -121,7 +146,15 @@ export function ChatView({
   useEffect(() => {
     if (!tab || !conv.id || !messages.length || messages.some((m) => m.status === "streaming" || m.status === "thinking")) return;
     const now = Date.now();
-    const cleanMsgs = messages.filter((m) => m.status !== "error").map(({ role, content, kind, model }) => ({ role, content, kind, model }));
+    const cleanMsgs = messages
+      .filter((m) => m.status !== "error")
+      .map(({ role, content, kind, model, attachments: atts }) => ({
+        role,
+        content,
+        kind,
+        model,
+        ...(atts?.length ? { attachments: atts } : {}),
+      }));
     const pageTitleToSave = effectivePageTitle || host || effectiveUrl;
     const autoTitle = conv.chatTitle || deriveChatTitle(cleanMsgs, pageTitleToSave, host);
     store.put({
@@ -137,8 +170,75 @@ export function ChatView({
     }).catch(() => {});
   }, [messages, conv.id, conv.chatTitle, effectivePageTitle, effectiveFavIcon, effectiveUrl, host, tab]);
 
-  async function send(text: string, kind?: "summary") {
-    if (!text.trim() || busy) return;
+  async function addFiles(fileList: FileList | File[]) {
+    const files = Array.from(fileList);
+    if (!files.length) return;
+    const added: ChatAttachment[] = [];
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        const dataUrl = await fileToDataUrl(file);
+        const ext = (file.type.split("/")[1] || "png").replace(/jpeg/, "jpg").split("+")[0];
+        const isGeneric = !file.name || /^image\.\w+$/i.test(file.name);
+        added.push({
+          id: newId(),
+          kind: "image",
+          name: isGeneric ? formatPastedFileName(ext, "pasted") : file.name,
+          size: file.size,
+          mimeType: file.type || "image/png",
+          dataUrl,
+        });
+      } else {
+        const textContent = await file.text();
+        added.push({
+          id: newId(),
+          kind: "text",
+          name: file.name || formatPastedFileName("txt", "pasted"),
+          size: file.size || new Blob([textContent]).size,
+          mimeType: file.type || "text/plain",
+          textContent,
+        });
+      }
+    }
+    if (added.length) {
+      setAttachments((prev) => [...prev, ...added]);
+    }
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const imageFiles: File[] = [];
+    for (const item of Array.from(cd.items ?? [])) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const f = item.getAsFile();
+        if (f) imageFiles.push(f);
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      void addFiles(imageFiles);
+      return;
+    }
+    const pastedText = cd.getData("text/plain") ?? "";
+    if (pastedText.length >= LONG_TEXT_PASTE_THRESHOLD) {
+      e.preventDefault();
+      const bytes = new Blob([pastedText]).size;
+      const att: ChatAttachment = {
+        id: newId(),
+        kind: "text",
+        name: formatPastedFileName("txt", "pasted"),
+        size: bytes,
+        mimeType: "text/plain",
+        textContent: pastedText,
+      };
+      setAttachments((prev) => [...prev, att]);
+      toast({ text: tr("chat.pastedLongText", { count: pastedText.length }), tone: "info" });
+    }
+  }
+
+  async function send(text: string, kind?: "summary", overrideAttachments?: ChatAttachment[]) {
+    const activeAttachments = overrideAttachments ?? (kind === "summary" ? [] : attachments);
+    if ((!text.trim() && activeAttachments.length === 0) || busy) return;
     if (!configured) return onSetup();
     const cmd = tr("agent.command");
     if (!kind && (text.trim().startsWith(cmd) || text.trim().startsWith("/act"))) {
@@ -147,11 +247,24 @@ export function ChatView({
       setInput("");
       return setAgentTask({ tabId: tab.id, task, key: Date.now() });
     }
-    const user: Msg = { id: `u${Date.now()}`, role: "user", content: text.trim(), kind };
+    const user: Msg = {
+      id: `u${Date.now()}`,
+      role: "user",
+      content: text.trim(),
+      kind,
+      ...(activeAttachments.length ? { attachments: activeAttachments } : {}),
+    };
     const asst: Msg = { id: `a${Date.now()}`, role: "assistant", content: "", status: "streaming", kind };
-    const history = [...messages.filter((m) => m.status !== "error"), user].map(({ role, content }) => ({ role, content }));
+    const history = [...messages.filter((m) => m.status !== "error"), user].map(({ role, content, attachments: atts }) => ({
+      role,
+      content,
+      ...(atts?.length ? { attachments: atts } : {}),
+    }));
     setMessages((m) => [...m, user, asst]);
     setInput("");
+    if (!overrideAttachments && kind !== "summary") {
+      setAttachments([]);
+    }
     const patch = (f: (x: Msg) => Msg) => setMessages((m) => m.map((x) => (x.id === asst.id ? f(x) : x)));
     // Busy from the start: reading a long PDF takes a while, and Stop must cancel it too.
     const reading = new AbortController();
@@ -355,7 +468,14 @@ export function ChatView({
             {pageOk && <PageChip tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} className="mt-1 bg-card" />}
             <div className="space-y-5 pt-4">
               {messages.map((m, i) => (
-                <MessageItem key={m.id} m={m} mood={i === messages.length - 1 ? chatMood : undefined} onRetry={() => send(messages[i - 1]?.content ?? "", m.kind)} onLocate={locate} />
+                <MessageItem
+                  key={m.id}
+                  m={m}
+                  mood={i === messages.length - 1 ? chatMood : undefined}
+                  onRetry={() => send(messages[i - 1]?.content ?? "", m.kind, messages[i - 1]?.attachments)}
+                  onLocate={locate}
+                  onPreviewAttachment={setPreviewAtt}
+                />
               ))}
             </div>
           </>
@@ -396,15 +516,39 @@ export function ChatView({
         )}
       </div>
 
-      {/* composer: big rounded box · toolbar icons · model selector + round send (bottom-right) */}
+      {/* composer: big rounded box · attachment chips · toolbar icons · model selector + round send (bottom-right) */}
       <div className="shrink-0 p-3 pt-2">
-        <div className="rounded-[22px] border border-border bg-background shadow-[0_1px_3px_rgb(16_24_40/0.05)] transition focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-ring/40 dark:bg-card">
+        <div
+          onDragOver={(e) => {
+            if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (e.dataTransfer?.files?.length) {
+              e.preventDefault();
+              void addFiles(e.dataTransfer.files);
+            }
+          }}
+          className="rounded-[22px] border border-border bg-background shadow-[0_1px_3px_rgb(16_24_40/0.05)] transition focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-ring/40 dark:bg-card"
+        >
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-3 pt-3 pb-0.5" data-testid="composer-attachments">
+              {attachments.map((att) => (
+                <AttachmentChip
+                  key={att.id}
+                  att={att}
+                  onPreview={() => setPreviewAtt(att)}
+                  onRemove={() => setAttachments((prev) => prev.filter((x) => x.id !== att.id))}
+                />
+              ))}
+            </div>
+          )}
           <textarea
             data-testid="composer"
             rows={2}
             value={input}
             onFocus={() => setComposerFocused(true)}
             onBlur={() => setComposerFocused(false)}
+            onPaste={handlePaste}
             onChange={(e) => {
               setInput(e.target.value);
               e.target.style.height = "auto";
@@ -419,7 +563,19 @@ export function ChatView({
             placeholder={tr("chat.placeholder")}
             className="block max-h-40 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
           />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.txt,.md,.json,.csv,.log,.xml,.yaml,.yml"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) void addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           <div className="flex items-center gap-1 px-2.5 pb-2.5">
+            <ToolBtn icon={Plus} label={tr("chat.addAttachment")} onClick={() => fileInputRef.current?.click()} testId="attach-file" />
             <ToolBtn icon={FileText} label={tr("chat.usePage")} on={usePage && pageOk} disabled={!pageOk} onClick={() => setUsePage((v) => !v)} testId="use-page" />
             <ToolBtn icon={TextQuote} label={tr("chat.quoteSelection")} disabled={!pageOk} onClick={quoteSelection} testId="quote-selection" />
             <div className="flex-1" />
@@ -457,7 +613,7 @@ export function ChatView({
                 <Square className="size-3 fill-current" />
               </button>
             ) : (
-              <button onClick={() => send(input)} disabled={!input.trim()} data-testid="send" aria-label={tr("chat.send")}
+              <button onClick={() => send(input)} disabled={!input.trim() && attachments.length === 0} data-testid="send" aria-label={tr("chat.send")}
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-input disabled:text-muted-foreground">
                 <ArrowUp className="size-4" strokeWidth={2.4} />
               </button>
@@ -465,6 +621,8 @@ export function ChatView({
           </div>
         </div>
       </div>
+
+      {previewAtt && <AttachmentPreviewModal att={previewAtt} onClose={() => setPreviewAtt(null)} />}
 
       {settingsPage && (
         <SidebarSettings
@@ -587,7 +745,117 @@ function Home(p: { mood: MascotState; tab: TabInfo | null; pageTitle?: string; f
   );
 }
 
-function MessageItem({ m, mood, onRetry, onLocate }: { m: Msg; mood?: MascotState; onRetry: () => void; onLocate: (text: string) => void }) {
+function AttachmentChip({
+  att,
+  onRemove,
+  onPreview,
+}: {
+  att: ChatAttachment;
+  onRemove?: () => void;
+  onPreview?: () => void;
+}) {
+  const isImage = att.kind === "image";
+  const extLabel = isImage
+    ? ((att.mimeType?.split("/")[1] || att.name.split(".").pop() || "IMG").replace(/jpeg/i, "JPG").split("+")[0] || "IMG").toUpperCase()
+    : (att.name.split(".").pop() || "TXT").toUpperCase().slice(0, 5);
+  const subLabel = isImage
+    ? `${extLabel} · ${formatBytes(att.size)}`
+    : `${extLabel} · ${(att.textContent?.length ?? 0).toLocaleString()} ${tr("chat.chars")} · ${formatBytes(att.size)}`;
+
+  return (
+    <div
+      data-testid={`attachment-chip-${att.kind}`}
+      onClick={onPreview}
+      className={cn(
+        "group relative flex w-[212px] max-w-full items-center gap-2.5 rounded-[14px] border border-border/80 bg-muted/45 p-2 text-left transition hover:bg-muted/75 dark:bg-white/[0.04]",
+        onRemove && "pr-7",
+        onPreview && "cursor-pointer",
+      )}
+    >
+      <div className="size-10 shrink-0 overflow-hidden rounded-[9px] border border-border/60 bg-background shadow-2xs">
+        {isImage && att.dataUrl ? (
+          <img src={att.dataUrl} alt={att.name} className="size-full object-cover" />
+        ) : (
+          <div className="size-full overflow-hidden p-1 font-mono text-[4.5px] leading-[6px] text-foreground/65 select-none whitespace-pre-wrap break-all">
+            {(att.textContent ?? "").slice(0, 260)}
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium leading-snug text-foreground" title={att.name}>
+          {att.name}
+        </div>
+        <div className="mt-0.5 truncate text-[11.5px] leading-snug text-muted-foreground">
+          {subLabel}
+        </div>
+      </div>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          aria-label={tr("chat.removeAttachment")}
+          data-testid="remove-attachment"
+          className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded-full text-muted-foreground transition hover:bg-background/90 hover:text-foreground"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AttachmentPreviewModal({ att, onClose }: { att: ChatAttachment; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-3 backdrop-blur-xs animate-in"
+      onClick={onClose}
+      data-testid="attachment-preview-modal"
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-[18px] border border-border bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13.5px] font-semibold">{att.name}</div>
+            <div className="text-[11.5px] text-muted-foreground">
+              {att.kind === "image"
+                ? formatBytes(att.size)
+                : `${(att.textContent?.length ?? 0).toLocaleString()} ${tr("chat.chars")} · ${formatBytes(att.size)}`}
+            </div>
+          </div>
+          <IconButton icon={X} label={tr("common.close")} onClick={onClose} />
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto p-3.5">
+          {att.kind === "image" && att.dataUrl ? (
+            <img src={att.dataUrl} alt={att.name} className="mx-auto max-h-[70vh] rounded-lg object-contain" />
+          ) : (
+            <pre className="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/90">
+              {att.textContent}
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageItem({
+  m,
+  mood,
+  onRetry,
+  onLocate,
+  onPreviewAttachment,
+}: {
+  m: Msg;
+  mood?: MascotState;
+  onRetry: () => void;
+  onLocate: (text: string) => void;
+  onPreviewAttachment: (att: ChatAttachment) => void;
+}) {
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const footnotes = () => [...(ref.current?.querySelectorAll("section[data-footnotes] li") ?? [])].map((li) => li.textContent?.replace(/↩\s*$/, "").trim() ?? "");
@@ -607,10 +875,19 @@ function MessageItem({ m, mood, onRetry, onLocate }: { m: Msg; mood?: MascotStat
   };
   if (m.role === "user")
     return (
-      <div className="flex animate-in justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-card rounded-br-[6px] bg-primary-soft px-3.5 py-2 text-[14px] leading-6 text-foreground">
-          {m.kind === "summary" ? <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{m.content}</span> : m.content}
-        </div>
+      <div className="flex animate-in flex-col items-end gap-1.5">
+        {m.attachments && m.attachments.length > 0 && (
+          <div className="flex max-w-[90%] flex-wrap justify-end gap-1.5" data-testid="user-message-attachments">
+            {m.attachments.map((att) => (
+              <AttachmentChip key={att.id} att={att} onPreview={() => onPreviewAttachment(att)} />
+            ))}
+          </div>
+        )}
+        {m.content && (
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-card rounded-br-[6px] bg-primary-soft px-3.5 py-2 text-[14px] leading-6 text-foreground">
+            {m.kind === "summary" ? <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{m.content}</span> : m.content}
+          </div>
+        )}
       </div>
     );
   return (

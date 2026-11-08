@@ -424,4 +424,8 @@ export const en: Catalog = {
   "hud.pressing": "Pressing key {key}",
   "hud.selecting": "Selecting option {target}",
   "hud.extracting": "Extracting page content…",
+  "chat.addAttachment": "Attach image or text file",
+  "chat.removeAttachment": "Remove attachment",
+  "chat.chars": "chars",
+  "chat.pastedLongText": "Converted long text ({count} chars) into attachment",
 };

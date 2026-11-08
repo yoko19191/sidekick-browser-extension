@@ -60,9 +60,26 @@ export interface Settings {
 }
 
 // ---- messaging ----
+export const LONG_TEXT_PASTE_THRESHOLD = 5000;
+
+export interface ChatAttachment {
+  id: string;
+  kind: "image" | "text";
+  name: string;
+  /** Byte size of the image or UTF-8 byte length of the long text. */
+  size: number;
+  /** MIME type (e.g. "image/png", "image/jpeg", "text/plain"). */
+  mimeType?: string;
+  /** For kind === "image": base64 Data URL ("data:image/png;base64,..."). */
+  dataUrl?: string;
+  /** For kind === "text": full pasted text content (>= LONG_TEXT_PASTE_THRESHOLD chars). */
+  textContent?: string;
+}
+
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
+  attachments?: ChatAttachment[];
 }
 
 export type PortRequest =

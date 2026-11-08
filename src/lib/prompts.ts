@@ -192,7 +192,7 @@ export function cleanGeneratedTitle(raw: string): string {
 
 /** Derive an immediate, meaningful conversation title before (or as fallback for) async LLM title generation. */
 export function deriveChatTitle(
-  messages: { role: string; content: string; kind?: string }[],
+  messages: { role: string; content: string; kind?: string; attachments?: { name: string; textContent?: string }[] }[],
   pageTitle?: string,
   host?: string,
 ): string {
@@ -223,6 +223,15 @@ export function deriveChatTitle(
       .replace(/\s+/g, " ")
       .trim();
     if (cleanedUser && cleanedUser !== summarizeCmd) return cleanedUser.slice(0, 32);
+  }
+
+  if (firstUser?.attachments?.length) {
+    const firstAtt = firstUser.attachments[0];
+    if (firstAtt.textContent) {
+      const fromText = cleanGeneratedTitle(firstAtt.textContent.slice(0, 200));
+      if (fromText) return fromText;
+    }
+    return firstAtt.name.slice(0, 32);
   }
 
   return readablePageTitle || host || firstUser?.content?.slice(0, 32) || "";

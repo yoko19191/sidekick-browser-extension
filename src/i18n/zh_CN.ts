@@ -426,4 +426,8 @@ export const zh_CN = {
   "hud.pressing": "正在按下按键 {key}",
   "hud.selecting": "正在选择下拉项 {target}",
   "hud.extracting": "正在提取页面内容…",
+  "chat.addAttachment": "添加图片或文本附件",
+  "chat.removeAttachment": "移除附件",
+  "chat.chars": "字符",
+  "chat.pastedLongText": "已将长文本（{count} 字符）转为附件卡片",
 } as const;

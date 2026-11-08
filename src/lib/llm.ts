@@ -2,7 +2,7 @@
  * Model layer (service worker only). Uses pi-ai's per-protocol stream functions, imported statically
  * because MV3 service workers do not support dynamic import().
  */
-import type { Api, AssistantMessageEvent, Context, Model, Tool, ToolCall } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessageEvent, Context, ImageContent, Model, TextContent, Tool, ToolCall } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { streamSimple as openaiStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { stream as codexRawStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
@@ -69,7 +69,7 @@ export function toPiModel(p: ProviderConfig, modelId: string, apiKey?: string): 
     provider: isCodex ? "openai-codex" : isCopilot ? "github-copilot" : `sidekick-${p.presetId}`,
     baseUrl: isCodex ? "https://chatgpt.com/backend-api" : normalizeBaseUrl(p.baseUrl),
     reasoning: meta.reasoning,
-    input: ["text"],
+    input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: meta.contextWindow,
     maxTokens: meta.maxTokens,
@@ -97,6 +97,36 @@ function streamFor(kind: ProviderKind, api?: Api) {
   return kind === "anthropic" ? anthropicStream : kind === "gemini" ? geminiStream : openaiStream;
 }
 
+/** Convert a ChatTurn (with optional base64 images and long-text attachments) into pi-ai UserMessage content. */
+export function buildUserContent(m: ChatTurn): string | (TextContent | ImageContent)[] {
+  if (!m.attachments?.length) return m.content;
+  const blocks: (TextContent | ImageContent)[] = [];
+  for (const att of m.attachments) {
+    if (att.kind === "text" && att.textContent) {
+      blocks.push({
+        type: "text",
+        text: `<pasted_text name=${JSON.stringify(att.name)} chars="${att.textContent.length}">\n${att.textContent}\n</pasted_text>`,
+      });
+    }
+  }
+  if (m.content.trim()) {
+    blocks.push({ type: "text", text: m.content });
+  }
+  for (const att of m.attachments) {
+    if (att.kind === "image" && att.dataUrl) {
+      const mData = att.dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+      const mimeType = mData?.[1] || att.mimeType || "image/png";
+      const data = mData?.[2] || att.dataUrl;
+      blocks.push({ type: "image", data, mimeType });
+    }
+  }
+  if (blocks.length === 0) return m.content;
+  if (!blocks.some((b) => b.type === "text")) {
+    blocks.unshift({ type: "text", text: "Please analyze the attached image(s)." });
+  }
+  return blocks;
+}
+
 /** Stream assistant text. Calls onDelta for each text chunk; resolves with the full text. */
 export async function streamText(
   args: StreamArgs,
@@ -109,7 +139,7 @@ export async function streamText(
     tools: args.tools,
     messages: args.messages.map((m) =>
       m.role === "user"
-        ? { role: "user", content: m.content, timestamp: now }
+        ? { role: "user", content: buildUserContent(m), timestamp: now }
         : ({
             role: "assistant",
             content: [{ type: "text", text: m.content }],
