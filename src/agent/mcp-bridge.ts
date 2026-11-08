@@ -14,6 +14,8 @@ import type { PageContent, ProviderConfig } from "@/src/lib/types";
 export const MCP_BRIDGE_STORAGE_KEY = "mcpBridge";
 export const DEFAULT_MCP_PORT = 17395;
 
+export type McpIndicatorState = "off" | "idle" | "active" | "error";
+
 export interface McpBridgeConfig {
   enabled: boolean;
   port: number;
@@ -22,6 +24,7 @@ export interface McpBridgeConfig {
 
 export interface McpBridgeStatus extends McpBridgeConfig {
   connected: boolean;
+  indicator?: McpIndicatorState;
   lastError?: string;
   lastCommandAt?: number;
   lastTool?: string;
@@ -232,30 +235,119 @@ export async function dispatchBridgeMethod(
   }
 }
 
+const ICON_SIZES = [16, 32, 48, 128] as const;
+const INDICATOR_COLORS: Record<Exclude<McpIndicatorState, "off">, string> = {
+  active: "#22c55e", // Green: actively operating
+  idle: "#3b82f6",   // Blue: connected, waiting for commands
+  error: "#ef4444",  // Red: connection failed or command error
+};
+
+let baseBitmapsPromise: Promise<Map<number, ImageBitmap>> | null = null;
+
+async function loadBaseBitmaps(): Promise<Map<number, ImageBitmap>> {
+  if (!baseBitmapsPromise) {
+    baseBitmapsPromise = (async () => {
+      const map = new Map<number, ImageBitmap>();
+      for (const size of ICON_SIZES) {
+        const res = await fetch(chrome.runtime.getURL(`icon/${size}.png`));
+        const blob = await res.blob();
+        map.set(size, await createImageBitmap(blob));
+      }
+      return map;
+    })().catch((e) => {
+      baseBitmapsPromise = null;
+      throw e;
+    });
+  }
+  return baseBitmapsPromise;
+}
+
+async function applyToolbarIconIndicator(state: McpIndicatorState): Promise<void> {
+  if (typeof OffscreenCanvas === "undefined" || typeof createImageBitmap === "undefined" || !globalThis.chrome?.action?.setIcon) {
+    return;
+  }
+  try {
+    const bitmaps = await loadBaseBitmaps();
+    const imageData: Record<number, ImageData> = {};
+    for (const size of ICON_SIZES) {
+      const bmp = bitmaps.get(size);
+      if (!bmp) continue;
+      const canvas = new OffscreenCanvas(size, size);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(bmp, 0, 0, size, size);
+      if (state !== "off") {
+        const cx = size * 0.77;
+        const cy = size * 0.77;
+        const r = Math.max(2.6, size * 0.19);
+        const halo = Math.max(1.2, size * 0.065);
+        // White contrast ring
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + halo, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        // Status dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = INDICATOR_COLORS[state];
+        ctx.fill();
+      }
+      imageData[size] = ctx.getImageData(0, 0, size, size);
+    }
+    await chrome.action.setIcon({ imageData });
+  } catch {
+    /* ignore in headless or unsupported environments */
+  }
+}
+
 export class McpBridgeClient {
   private cfg: McpBridgeConfig = { enabled: false, port: DEFAULT_MCP_PORT, token: "" };
   private ws: WebSocket | null = null;
   private connected = false;
+  private inflight = 0;
+  private activeHoldUntil = 0;
   private lastError?: string;
   private lastCommandAt?: number;
   private lastTool?: string;
+  private lastIndicator: McpIndicatorState = "off";
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private activeHoldTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: BridgeDeps) {}
 
   async start(): Promise<void> {
     this.cfg = await loadBridgeConfig();
     if (this.cfg.enabled) this.connect();
+    else this.syncIndicator();
+  }
+
+  computeIndicator(): McpIndicatorState {
+    if (!this.cfg.enabled) return "off";
+    if (!this.connected) return "error";
+    if (this.inflight > 0 || Date.now() < this.activeHoldUntil) return "active";
+    if (this.lastError) return "error";
+    return "idle";
+  }
+
+  private syncIndicator() {
+    const next = this.computeIndicator();
+    if (next !== this.lastIndicator) {
+      this.lastIndicator = next;
+      void applyToolbarIconIndicator(next);
+    }
   }
 
   getStatus(): McpBridgeStatus {
     if (this.cfg.enabled && !this.connected && !this.ws && !this.reconnectTimer) {
       this.connect();
     }
+    const indicator = this.computeIndicator();
     return {
       ...this.cfg,
       connected: this.connected,
+      indicator,
       lastError: this.lastError,
       lastCommandAt: this.lastCommandAt,
       lastTool: this.lastTool,
@@ -269,6 +361,7 @@ export class McpBridgeClient {
     if (changed) {
       this.disconnect();
       if (this.cfg.enabled) this.connect();
+      else this.syncIndicator();
     }
     return this.getStatus();
   }
@@ -276,6 +369,7 @@ export class McpBridgeClient {
   reconnect(): McpBridgeStatus {
     this.disconnect();
     if (this.cfg.enabled) this.connect();
+    else this.syncIndicator();
     return this.getStatus();
   }
 
@@ -288,11 +382,17 @@ export class McpBridgeClient {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
+    if (this.activeHoldTimer) {
+      clearTimeout(this.activeHoldTimer);
+      this.activeHoldTimer = null;
+    }
   }
 
   private disconnect() {
     this.clearTimers();
     this.connected = false;
+    this.inflight = 0;
+    this.activeHoldUntil = 0;
     if (this.ws) {
       try {
         this.ws.onclose = null;
@@ -307,11 +407,21 @@ export class McpBridgeClient {
   }
 
   private scheduleReconnect() {
+    this.syncIndicator();
     if (!this.cfg.enabled || this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.cfg.enabled) this.connect();
     }, 3000);
+  }
+
+  private markActiveHold() {
+    this.activeHoldUntil = Date.now() + 2200;
+    if (this.activeHoldTimer) clearTimeout(this.activeHoldTimer);
+    this.activeHoldTimer = setTimeout(() => {
+      this.activeHoldTimer = null;
+      this.syncIndicator();
+    }, 2250);
   }
 
   private connect() {
@@ -325,6 +435,7 @@ export class McpBridgeClient {
       ws.onopen = () => {
         this.connected = true;
         this.lastError = undefined;
+        this.syncIndicator();
         try {
           ws.send(JSON.stringify({ type: "hello", client: "sidekick-extension", version: "0.1.0" }));
         } catch {
@@ -342,11 +453,21 @@ export class McpBridgeClient {
           if (!msg.method || msg.id === undefined) return;
           this.lastCommandAt = Date.now();
           this.lastTool = msg.method;
+          this.inflight++;
+          this.lastError = undefined;
+          this.syncIndicator();
           try {
             const result = await dispatchBridgeMethod(msg.method, msg.params ?? {}, this.deps);
+            this.inflight = Math.max(0, this.inflight - 1);
+            this.markActiveHold();
+            this.syncIndicator();
             ws.send(JSON.stringify({ id: msg.id, ok: true, result }));
           } catch (e) {
-            ws.send(JSON.stringify({ id: msg.id, ok: false, error: (e as Error)?.message ?? String(e) }));
+            this.inflight = Math.max(0, this.inflight - 1);
+            const errMsg = (e as Error)?.message ?? String(e);
+            this.lastError = errMsg;
+            this.syncIndicator();
+            ws.send(JSON.stringify({ id: msg.id, ok: false, error: errMsg }));
           }
         } catch {
           /* ignore malformed frame */
@@ -354,6 +475,7 @@ export class McpBridgeClient {
       };
       ws.onerror = () => {
         this.lastError = `Cannot connect to ws://127.0.0.1:${this.cfg.port}/ws`;
+        this.syncIndicator();
       };
       ws.onclose = () => {
         this.connected = false;

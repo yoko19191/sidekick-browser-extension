@@ -584,18 +584,32 @@ function McpBridgeCard() {
                   "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium",
                   !status.enabled
                     ? "bg-muted text-muted-foreground"
-                    : status.connected
+                    : status.indicator === "active"
                       ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+                      : status.indicator === "error" || !status.connected
+                        ? "bg-red-500/15 text-red-700 dark:text-red-300"
+                        : "bg-blue-500/15 text-blue-700 dark:text-blue-300",
                 )}
               >
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    !status.enabled ? "bg-muted-foreground/50" : status.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse",
+                    !status.enabled
+                      ? "bg-muted-foreground/50"
+                      : status.indicator === "active"
+                        ? "bg-emerald-500 animate-pulse"
+                        : status.indicator === "error" || !status.connected
+                          ? "bg-red-500"
+                          : "bg-blue-500",
                   )}
                 />
-                {!status.enabled ? tr("mcp.badgeDisabled") : status.connected ? tr("mcp.badgeConnected") : tr("mcp.badgeWaiting")}
+                {!status.enabled
+                  ? tr("mcp.badgeDisabled")
+                  : status.indicator === "active"
+                    ? tr("mcp.badgeActive")
+                    : status.indicator === "error" || !status.connected
+                      ? tr("mcp.badgeWaiting")
+                      : tr("mcp.badgeConnected")}
               </span>
             </div>
             <p className="mt-0.5 text-[12.5px] text-muted-foreground">{tr("mcp.subtitle")}</p>
@@ -612,7 +626,13 @@ function McpBridgeCard() {
           <span
             className={cn(
               "size-2 shrink-0 rounded-full",
-              !status.enabled ? "bg-muted-foreground/40" : status.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse",
+              !status.enabled
+                ? "bg-muted-foreground/40"
+                : status.indicator === "active"
+                  ? "bg-emerald-500 animate-pulse"
+                  : status.indicator === "error" || !status.connected
+                    ? "bg-red-500"
+                    : "bg-blue-500",
             )}
           />
           <span className="truncate font-mono text-[12px] font-medium text-foreground/90" data-testid="mcp-status-text">
