@@ -10,6 +10,7 @@ import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib
 import { tr } from "@/src/i18n";
 import { AGENT_PORT } from "@/src/agent/protocol";
 import { attachAgentPort } from "@/src/agent/sw-host";
+import { McpBridgeClient, type McpBridgeConfig } from "@/src/agent/mcp-bridge";
 
 declare const __E2E__: boolean;
 export const LLM_PORT = "sidekick-llm";
@@ -70,6 +71,12 @@ export default defineBackground({
       const s = await loadSettings();
       await chrome.tabs.sendMessage(tabId, { type: "pp:config", settings: s.translation }).catch(() => {});
     }
+
+    const mcpBridge = new McpBridgeClient({
+      ensureInjected: ensureContentScript,
+      resolveModel: async () => resolveTask((await loadSettings()).models.chat),
+    });
+    void mcpBridge.start();
 
     const translateInflight = new Map<number, Set<AbortController>>();
     function abortTabTranslations(tabId: number) {
@@ -287,6 +294,12 @@ export default defineBackground({
           return reply(cache.count());
         case "cache:clear":
           return reply(cache.clear());
+        case "mcp:status":
+          return reply(Promise.resolve(mcpBridge.getStatus()));
+        case "mcp:config":
+          return reply(mcpBridge.configure((msg.config ?? {}) as Partial<McpBridgeConfig>));
+        case "mcp:reconnect":
+          return reply(Promise.resolve(mcpBridge.reconnect()));
         case "chat:title":
           return reply(
             (async () => {

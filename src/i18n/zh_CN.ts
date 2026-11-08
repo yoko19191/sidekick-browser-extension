@@ -334,4 +334,20 @@ export const zh_CN = {
   "agent.addSite": "添加",
   "agent.sitePlaceholder": "example.com",
   "agent.remove": "移除",
+
+  // ---- MCP Bridge ----
+  "mcp.title": "MCP 屏幕控制桥接（外部 Agent 接入）",
+  "mcp.desc": "开启后，任何支持 MCP 协议的 AI Agent（Claude Code、Cursor、Antigravity、Windsurf、Claude Desktop 等）可直接读取并操作当前已登录的 Chrome 浏览器标签页，无需重启浏览器。",
+  "mcp.enable": "启用本地 MCP 桥接",
+  "mcp.statusConnected": "已连接本地 MCP 服务（ws://127.0.0.1:{port}/ws）",
+  "mcp.statusWaiting": "等待本地 MCP 服务启动（ws://127.0.0.1:{port}/ws）",
+  "mcp.statusDisabled": "未启用",
+  "mcp.port": "本地桥接端口",
+  "mcp.token": "配对密钥（可选）",
+  "mcp.tokenPlaceholder": "留空则仅校验本机 127.0.0.1",
+  "mcp.reconnect": "立即重连",
+  "mcp.copyConfig": "复制 MCP 配置 JSON",
+  "mcp.copied": "已复制 MCP 配置 JSON",
+  "mcp.lastTool": "最近调用：{tool}",
+  "mcp.toolsSummary": "暴露工具（15 项）：browser_snapshot · browser_click · browser_input · browser_select_option · browser_scroll · browser_send_keys · browser_navigate · browser_go_back · browser_search_page · browser_wait · browser_extract · browser_screenshot · browser_tabs_list · browser_tab_open · browser_run_task",
 } as const;

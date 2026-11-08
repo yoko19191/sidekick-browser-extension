@@ -15,6 +15,7 @@ import { ProviderIcon } from "../components/ProviderIcon";
 import { useProviders, useSettings, useTheme } from "../hooks";
 import { bg } from "../messaging";
 import { tr } from "@/src/i18n";
+import { DEFAULT_MCP_PORT, type McpBridgeStatus } from "@/src/agent/mcp-bridge";
 
 type SectionId = "models" | "translation" | "chat" | "appearance" | "shortcuts" | "data" | "agent";
 const SECTIONS: { id: SectionId; label: string; icon: typeof KeyRound }[] = [
@@ -483,6 +484,125 @@ function DataSection({ update }: Ctx) {
   );
 }
 
+function McpBridgeCard() {
+  const toast = useToast();
+  const [status, setStatus] = useState<McpBridgeStatus>({
+    enabled: false,
+    connected: false,
+    port: DEFAULT_MCP_PORT,
+    token: "",
+  });
+  const [portInput, setPortInput] = useState(String(DEFAULT_MCP_PORT));
+  const [tokenInput, setTokenInput] = useState("");
+
+  const refresh = async () => {
+    try {
+      const s = await bg<McpBridgeStatus>({ type: "mcp:status" });
+      if (s) setStatus(s);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    bg<McpBridgeStatus>({ type: "mcp:status" })
+      .then((s) => {
+        if (s) {
+          setStatus(s);
+          setPortInput(String(s.port));
+          setTokenInput(s.token);
+        }
+      })
+      .catch(() => {});
+    const t = setInterval(refresh, 2500);
+    return () => clearInterval(t);
+  }, []);
+
+  const toggle = async (enabled: boolean) => {
+    if (enabled) {
+      await chrome.permissions.request({ origins: ["<all_urls>"] }).catch(() => false);
+    }
+    const s = await bg<McpBridgeStatus>({
+      type: "mcp:config",
+      config: { enabled, port: Number(portInput) || DEFAULT_MCP_PORT, token: tokenInput.trim() },
+    });
+    if (s) setStatus(s);
+  };
+
+  const applyConfig = async () => {
+    const s = await bg<McpBridgeStatus>({
+      type: "mcp:config",
+      config: { port: Number(portInput) || DEFAULT_MCP_PORT, token: tokenInput.trim() },
+    });
+    if (s) setStatus(s);
+    await bg<McpBridgeStatus>({ type: "mcp:reconnect" }).then((r) => r && setStatus(r));
+  };
+
+  const copyMcpJson = () => {
+    const args = ["scripts/mcp-server.mjs", `--port=${status.port}`];
+    if (status.token) args.push(`--token=${status.token}`);
+    const snippet = JSON.stringify(
+      {
+        mcpServers: {
+          "sidekick-browser": {
+            command: "node",
+            args,
+          },
+        },
+      },
+      null,
+      2,
+    );
+    navigator.clipboard.writeText(snippet);
+    toast({ text: tr("mcp.copied"), tone: "info" });
+  };
+
+  return (
+    <Card data-testid="mcp-bridge-card">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <SectionLabel>{tr("mcp.title")}</SectionLabel>
+          <p className="mt-1 text-[13px] leading-5 text-muted-foreground">{tr("mcp.desc")}</p>
+        </div>
+        <Switch testId="mcp-enable" checked={status.enabled} onChange={toggle} label={tr("mcp.enable")} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-btn bg-muted/50 px-3 py-2 text-[12.5px]">
+        <span
+          className={cn(
+            "size-2 shrink-0 rounded-full",
+            !status.enabled ? "bg-muted-foreground/40" : status.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse",
+          )}
+        />
+        <span className="flex-1 font-medium" data-testid="mcp-status-text">
+          {!status.enabled
+            ? tr("mcp.statusDisabled")
+            : status.connected
+              ? tr("mcp.statusConnected", { port: status.port })
+              : tr("mcp.statusWaiting", { port: status.port })}
+        </span>
+        {status.lastTool && <span className="text-[11.5px] text-muted-foreground">{tr("mcp.lastTool", { tool: status.lastTool })}</span>}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <TextField label={tr("mcp.port")} value={portInput} onChange={setPortInput} mono testId="mcp-port" />
+        <TextField label={tr("mcp.token")} value={tokenInput} onChange={setTokenInput} placeholder={tr("mcp.tokenPlaceholder")} mono testId="mcp-token" />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="secondary" icon={RefreshCw} onClick={applyConfig} testId="mcp-reconnect">
+          {tr("mcp.reconnect")}
+        </Button>
+        <Button size="sm" variant="outline" onClick={copyMcpJson} testId="mcp-copy-config">
+          {tr("mcp.copyConfig")}
+        </Button>
+      </div>
+
+      <p className="mt-3 text-[11.5px] leading-5 text-muted-foreground">{tr("mcp.toolsSummary")}</p>
+    </Card>
+  );
+}
+
 function AgentSection() {
   const [neverSites, setNever] = useState<{ site: string }[]>([]);
   const [allows, setAllows] = useState<{ site: string; kinds: string[] }[]>([]);
@@ -522,6 +642,7 @@ function AgentSection() {
   };
   return (
     <div className="mt-6 space-y-6">
+      <McpBridgeCard />
       <Card>
         <SectionLabel>{tr("agent.neverSites")}</SectionLabel>
         <p className="mb-3 text-[13px] text-muted-foreground">{tr("agent.neverSitesHelp")}</p>
