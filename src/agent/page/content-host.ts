@@ -1,5 +1,6 @@
 /** Content-script side of the agent: hosts one PageObserver per page and answers agent:* messages. */
 import { PageObserver } from "./observer";
+import { retargetToThisTab } from "./dom";
 import type { ActionRequest } from "../types";
 import { tr } from "@/src/i18n";
 
@@ -343,6 +344,10 @@ export async function handleAgentMessage(msg: AgentPageMessage): Promise<{ ok: t
         for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter", "mousemove"]) {
           el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
         }
+      } else {
+        // Ensure CDP clicks on <a target="_blank"> also navigate in the current tab instead of spawning a new tab.
+        const restore = retargetToThisTab(el, true);
+        if (restore) setTimeout(restore, 250);
       }
       return {
         ok: true,

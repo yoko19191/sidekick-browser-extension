@@ -95,7 +95,8 @@ export function ChatView({
   const tab = useActiveTab();
   const toast = useToast();
   const [convs, setConvs] = useState<Record<string, ConvEntry>>({});
-  const tabKey = tab ? `${tab.id}` : "none";
+  // Keep the sidebar conversation pinned across tab switches so Agent runs and multi-page browsing never reset the panel UI.
+  const tabKey = "active";
   const conv = convs[tabKey] ?? { id: "", messages: [] };
   const messages = conv.messages;
   const setMessages = useCallback(

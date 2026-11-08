@@ -41,6 +41,11 @@ function popupNote(tabs: chrome.tabs.Tab[]): string {
 }
 
 export interface TabDriverOptions {
+  /**
+   * Keep navigation inside the single initial tab: rewrite target="_blank" to _top, and if a script popup
+   * opens a new tab with an http(s) URL, navigate the current tab to that URL and close the popup tab.
+   */
+  keepInSingleTab?: boolean;
   /** Automatically switch the active tab when a click/Enter opens a new tab. */
   autoFollowNewTab?: boolean;
   /** Optional check for whether CDP Enhanced Mode is active. */
@@ -224,7 +229,7 @@ export class TabDriver implements PageDriver {
       }
       if (!r) {
         const execAction: ActionRequest =
-          this.opts.autoFollowNewTab && action.name === "click"
+          this.opts.autoFollowNewTab && !this.opts.keepInSingleTab && action.name === "click"
             ? { name: action.name, args: { ...action.args, allowNewTab: true } }
             : action;
         r = await raceAbort(this.call<ActionResult>({ type: "agent:execute", action: execAction }), signal);
@@ -233,9 +238,21 @@ export class TabDriver implements PageDriver {
       // tabs.onCreated can arrive after the content script's reply
       await abortableSleep(POPUP_GRACE_MS, signal);
       if (opened.length > 0) {
+        const newest = opened[opened.length - 1];
+        const newUrl = newest.pendingUrl || newest.url || "";
+        // Single-tab mode: if JS window.open spawned a new tab with a valid http(s) URL, absorb it into the
+        // current tab and close the spawned tab so the browser and sidebar stay on a single tab.
+        if (this.opts.keepInSingleTab && newest.id != null && newUrl && !isRestrictedUrl(newUrl)) {
+          await chrome.tabs.remove?.(newest.id)?.catch?.(() => {});
+          await chrome.tabs.update?.(this.currentTabId, { url: newUrl })?.catch?.(() => {});
+          await chrome.tabs.update?.(this.currentTabId, { active: true })?.catch?.(() => {});
+          await new Promise((res) => setTimeout(res, 250));
+          await raceAbort(this.waitLoaded(this.currentTabId), signal).catch(() => {});
+          await this.ensureInjected(this.currentTabId).catch(() => {});
+          const safeUrl = newUrl.replace(/</g, "‹").replace(/>/g, "›");
+          return { ...r, message: `${r.message}; redirected popup URL into this tab (${safeUrl})` };
+        }
         if (this.opts.autoFollowNewTab) {
-          const newest = opened[opened.length - 1];
-          const newUrl = newest.pendingUrl || newest.url || "";
           if (newest.id != null && (!newUrl || !isRestrictedUrl(newUrl))) {
             this.tabHistory.push(this.currentTabId);
             this.currentTabId = newest.id;

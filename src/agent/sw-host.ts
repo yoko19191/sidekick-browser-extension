@@ -81,6 +81,7 @@ export function attachAgentPort(port: chrome.runtime.Port, deps: SwDeps) {
         streamFn: agentStreamFn(r.provider.kind),
         getApiKey: () => r.apiKey,
         driver: new TabDriver(req.tabId, deps.ensureInjected, {
+          keepInSingleTab: true,
           autoFollowNewTab: true,
           useCdp: async () => Boolean((await loadBridgeConfig()).cdpEnabled && (await hasDebuggerPermission())),
         }),

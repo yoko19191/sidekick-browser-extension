@@ -70,4 +70,20 @@ describe("script popups", () => {
     expect(d.activeTabId).toBe(42);
     expect(r.message).toContain("switched to newly opened tab #42");
   });
+
+  it("absorbs a newly opened popup tab into the current tab when keepInSingleTab is enabled", async () => {
+    mockChrome((fire) => {
+      setTimeout(() => fire({ id: 42, openerTabId: 1, pendingUrl: "https://shop.example.com/item" }), 10);
+    });
+    const remove = vi.fn(async () => {});
+    const update = vi.fn(async () => ({}));
+    (globalThis as any).chrome.tabs.remove = remove;
+    (globalThis as any).chrome.tabs.update = update;
+    const d = new TabDriver(1, async () => {}, { keepInSingleTab: true, autoFollowNewTab: true });
+    const r = await d.execute({ name: "click", args: { index: "f0:1" } });
+    expect(d.activeTabId).toBe(1);
+    expect(remove).toHaveBeenCalledWith(42);
+    expect(update).toHaveBeenCalledWith(1, { url: "https://shop.example.com/item" });
+    expect(r.message).toContain("redirected popup URL into this tab");
+  });
 });
