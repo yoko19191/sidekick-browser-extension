@@ -485,7 +485,7 @@ export function ChatView({
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {messages.length === 0 ? (
           <Home mood={mood} tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
-            onExplain={explainSelection} onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
+            onExplain={explainSelection} onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE, "summary")} />
         ) : (
           <>
             {pageOk && <PageChip tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} className="mt-1 bg-card" />}

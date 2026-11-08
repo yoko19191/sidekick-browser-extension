@@ -384,7 +384,14 @@ export default defineBackground({
           send({ type: "start", id: req.id, model: `${r.provider.name} · ${r.modelId}` });
           const base = { provider: r.provider, modelId: r.modelId, apiKey, signal: ac.signal, temperature: s.chat.temperature, maxTokens: s.chat.maxTokens };
           const messages = req.messages.slice();
-          if (req.task === "summary" && messages.length) messages[messages.length - 1] = { role: "user", content: summaryInstruction(s) };
+          if (req.task === "summary" && messages.length) {
+            const lastText = messages[messages.length - 1].content.trim();
+            const isDefaultSummaryCmd = !lastText || lastText === tr("chat.summarizePage") || lastText === "Summarize page";
+            messages[messages.length - 1] = {
+              role: "user",
+              content: isDefaultSummaryCmd ? summaryInstruction(s) : `${lastText} Be faithful to the page; don't invent facts.`,
+            };
+          }
 
           // Long pages (>20k chars): summarize section by section, then merge (map-reduce).
           let sectionNotes: string | undefined;
@@ -397,7 +404,7 @@ export default defineBackground({
               chunks,
               SUMMARY_CONCURRENCY,
               async (chunk, i) => {
-                const n = await streamText({ ...base, maxTokens: 600, system: sectionPrompt(i, chunks.length), messages: [{ role: "user", content: chunk }] });
+                const n = await streamText({ ...base, maxTokens: 1200, system: sectionPrompt(i, chunks.length), messages: [{ role: "user", content: chunk }] });
                 return `## Section ${i + 1}\n${n.text.trim()}`;
               },
               {

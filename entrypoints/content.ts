@@ -273,8 +273,16 @@ export default defineContentScript({
           sendResponse({ ...state, active });
           return;
         case "page:extract":
-          sendResponse(extractPage(document));
-          return;
+          (async () => {
+            let extracted = extractPage(document);
+            // If an SPA is still mounting its initial DOM, wait briefly (up to 450ms) for content to appear.
+            for (let attempt = 0; attempt < 3 && (document.readyState === "loading" || extracted.markdown.length < 80); attempt++) {
+              await new Promise((r) => setTimeout(r, 150));
+              extracted = extractPage(document);
+            }
+            sendResponse(extracted);
+          })();
+          return true;
         case "page:locate":
           sendResponse({ found: locate(String(msg.text ?? "")) });
           return;

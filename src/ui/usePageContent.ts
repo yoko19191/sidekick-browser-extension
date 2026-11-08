@@ -78,7 +78,9 @@ export function usePageContent(tab: TabInfo | null) {
       if (!p) {
         p = read(tab, opts.onProgress, opts.signal);
         cache.current.set(k, p);
-        p.catch(() => cache.current.delete(k));
+        // Only deduplicate concurrent in-flight HTML extractions; always read live DOM on subsequent requests
+        // (lazy-loaded content, SPA route/tab updates, user scrolling). Parsed PDFs remain cached in `pdfs.current`.
+        p.finally(() => cache.current.delete(k));
       }
       try {
         const page = await p;
