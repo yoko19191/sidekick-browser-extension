@@ -92,6 +92,7 @@ export interface PageContent {
   pages?: number;
   title: string;
   url: string;
+  favIconUrl?: string;
   markdown: string;
   excerpt?: string;
   lang?: string;

@@ -40,6 +40,8 @@ export interface Conversation {
   id: string;
   url: string;
   title: string;
+  chatTitle?: string;
+  favIconUrl?: string;
   host: string;
   messages: (ChatTurn & { kind?: string; model?: string })[];
   createdAt: number;

@@ -2,8 +2,9 @@ import { TranslationCache } from "@/src/lib/cache";
 import { buildTranslatePrompt, parseTranslationResponse } from "@/src/lib/batch";
 import { promptVariant, translationCacheKey } from "@/src/lib/hash";
 import { listModels, streamText, testConnection } from "@/src/lib/llm";
-import { LONG_PAGE_CHARS, mapConcurrent, pageSystemPrompt, planChatExcerpts, planLongSummary, sectionPrompt, SUMMARY_CONCURRENCY, summaryInstruction } from "@/src/lib/prompts";
-import { friendlyError, getKey, keyOptional, loadProviders, redactSecrets, resolveModelRef } from "@/src/lib/providers";
+import { cleanGeneratedTitle, deriveChatTitle, LONG_PAGE_CHARS, mapConcurrent, pageSystemPrompt, planChatExcerpts, planLongSummary, sectionPrompt, SUMMARY_CONCURRENCY, summaryInstruction } from "@/src/lib/prompts";
+import { friendlyError, keyOptional, loadProviders, redactSecrets, resolveModelRef, type OAuthProviderId } from "@/src/lib/providers";
+import { ensureFreshKey, exchangeOAuthCode, pollOAuthSession, startOAuthFlow, tryCaptureOAuthTabUrl } from "@/src/lib/oauth";
 import { langName, loadSettings } from "@/src/lib/settings";
 import type { ModelRef, PortEvent, PortRequest, ProviderConfig } from "@/src/lib/types";
 import { tr } from "@/src/i18n";
@@ -50,8 +51,8 @@ export default defineBackground({
 
     async function resolveTask(ref: ModelRef) {
       const providers = await loadProviders();
-      const keys = new Map<string, string | undefined>();
-      for (const p of providers) keys.set(p.id, await getKey(p.id));
+      const entries = await Promise.all(providers.map(async (p) => [p.id, await ensureFreshKey(p.id)] as const));
+      const keys = new Map<string, string | undefined>(entries);
       const usable = (p: ProviderConfig) => !!keys.get(p.id) || keyOptional(p);
       const r = resolveModelRef(ref, providers, usable);
       if (!r) throw new Error(tr("err.noModel"));
@@ -98,6 +99,9 @@ export default defineBackground({
 
     // Auto-inject only where the user granted host access: floating button, selection translation, per-site auto-translate.
     chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+      if (tab.url && tab.url.includes("code=")) {
+        void tryCaptureOAuthTabUrl(tab.url);
+      }
       if (info.status !== "complete" || !tab.url || !/^https?:/.test(tab.url)) return;
       const origin = new URL(tab.url).origin;
       const host = new URL(tab.url).host;
@@ -139,7 +143,7 @@ export default defineBackground({
           if (!idx.length) return;
           if (ac.signal.aborted) throw new DOMException("aborted", "AbortError");
           const prompt = buildTranslatePrompt(idx.map((i) => texts[i]), langName(t.targetLang), t.extraPrompt);
-          const r = await streamText({ provider, modelId, apiKey, signal: ac.signal, system: prompt.system, messages: [{ role: "user", content: prompt.user }], temperature: 0.2, maxTokens: 8192 });
+          const r = await streamText({ provider, modelId, apiKey, signal: ac.signal, system: prompt.system, messages: [{ role: "user", content: prompt.user }], temperature: 0.2, maxTokens: 2048 });
           const parsed = parseTranslationResponse(r.text, idx.length);
           if (!parsed) {
             if (idx.length === 1) throw new Error(tr("err.unparsable"));
@@ -194,7 +198,7 @@ export default defineBackground({
       if (!msg.provider?.id) throw new Error(tr("err.noProvider"));
       if (msg.apiKey) return { provider: msg.provider, key: msg.apiKey };
       const stored = (await loadProviders()).find((p) => p.id === msg.provider!.id);
-      if (stored) return { provider: stored, key: await getKey(stored.id) };
+      if (stored) return { provider: stored, key: await ensureFreshKey(stored.id) };
       return { provider: msg.provider, key: undefined }; // unsaved and keyless (e.g. Ollama during onboarding): nothing secret involved
     }
 
@@ -273,10 +277,45 @@ export default defineBackground({
             const { provider, key } = await providerForRequest(msg);
             return listModels(provider, key);
           })());
+        case "oauth:start":
+          return reply(startOAuthFlow(msg.oauthId as OAuthProviderId, String(msg.providerId ?? "")));
+        case "oauth:poll":
+          return reply(pollOAuthSession(String(msg.sessionId ?? "")));
+        case "oauth:exchange":
+          return reply(exchangeOAuthCode(String(msg.sessionId ?? ""), String(msg.code ?? "")));
         case "cache:stats":
           return reply(cache.count());
         case "cache:clear":
           return reply(cache.clear());
+        case "chat:title":
+          return reply(
+            (async () => {
+              const msgs = (msg.messages as { role: string; content: string; kind?: string }[] | undefined) ?? [];
+              const fallback = deriveChatTitle(msgs, msg.pageTitle as string | undefined, msg.host as string | undefined);
+              if (__E2E__) return { title: fallback };
+              try {
+                const s = await loadSettings();
+                const { provider, modelId, apiKey } = await resolveTask(s.models.chat);
+                const userSample = msgs.find((m) => m.role === "user")?.content?.slice(0, 300) ?? "";
+                const asstSample = msgs.find((m) => m.role === "assistant" && m.content.trim())?.content?.slice(0, 600) ?? "";
+                const pageCtx = msg.pageTitle ? `Page: ${String(msg.pageTitle).slice(0, 120)}\n` : "";
+                const r = await streamText({
+                  provider,
+                  modelId,
+                  apiKey,
+                  temperature: 0.2,
+                  maxTokens: 32,
+                  system:
+                    "Generate a concise, specific title (6-18 characters in Chinese or 3-7 words in English, matching the assistant answer's language) for this conversation. Do NOT output generic phrases like 'Summarize page'. Output ONLY the title text without quotes or trailing punctuation.",
+                  messages: [{ role: "user", content: `${pageCtx}User: ${userSample}\nAssistant: ${asstSample}` }],
+                });
+                const cleaned = cleanGeneratedTitle(r.text);
+                return { title: cleaned || fallback };
+              } catch {
+                return { title: fallback };
+              }
+            })(),
+          );
         case "dev:selftest-tools":
           // M0 check (e2e builds only): pi-ai tool calling inside the MV3 service worker.
           if (!__E2E__) return false;
@@ -345,7 +384,7 @@ export default defineBackground({
               chunks,
               SUMMARY_CONCURRENCY,
               async (chunk, i) => {
-                const n = await streamText({ ...base, maxTokens: 1200, system: sectionPrompt(i, chunks.length), messages: [{ role: "user", content: chunk }] });
+                const n = await streamText({ ...base, maxTokens: 600, system: sectionPrompt(i, chunks.length), messages: [{ role: "user", content: chunk }] });
                 return `## Section ${i + 1}\n${n.text.trim()}`;
               },
               {

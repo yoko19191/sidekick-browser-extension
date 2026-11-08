@@ -2,7 +2,7 @@
  * The current tab's content for chat: HTML pages via the content script (Readability), PDF tabs via pdf.js in the
  * panel. Owns the per-tab cache, page-access errors and the one-click fix for each of them, and citation jumps.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isFileUrl, looksLikeLocalPdf, PdfAccessError, readPdfBytes, type PdfChunk, type PdfRef } from "@/src/lib/pdf/bytes";
 import { pageOfExcerpt, PdfNoTextError } from "@/src/lib/pdf/text";
 import type { PageContent } from "@/src/lib/types";
@@ -41,6 +41,11 @@ export function usePageContent(tab: TabInfo | null) {
   const cache = useRef(new Map<string, Promise<PageContent>>());
   const pdfs = useRef(new Map<string, PageContent>());
   const [error, setError] = useState<PageError | null>(null);
+  const [lastPage, setLastPage] = useState<PageContent | null>(null);
+
+  useEffect(() => {
+    setLastPage(null);
+  }, [tab?.id, tab?.url]);
 
   const keyOf = (t: TabInfo) => `${t.id}|${t.url}`;
   const pdfKeyOf = (t: TabInfo) => `${t.id}|${t.url.split("#")[0]}`;
@@ -64,7 +69,10 @@ export function usePageContent(tab: TabInfo | null) {
     async (opts: { onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {}): Promise<PageContent | undefined> => {
       if (!tab || (tab.url && restrictedUrl(tab.url))) return undefined; // url "" = hidden (no access yet), still worth trying
       const pdf = pdfs.current.get(pdfKeyOf(tab));
-      if (pdf) return pdf;
+      if (pdf) {
+        setLastPage(pdf);
+        return pdf;
+      }
       const k = keyOf(tab);
       let p = cache.current.get(k);
       if (!p) {
@@ -75,6 +83,7 @@ export function usePageContent(tab: TabInfo | null) {
       try {
         const page = await p;
         setError(null);
+        setLastPage(page);
         return page;
       } catch (e) {
         if ((e as Error)?.name === "AbortError") return undefined;
@@ -93,9 +102,8 @@ export function usePageContent(tab: TabInfo | null) {
       await chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
       return;
     }
-    // Without host access Chrome hides tab.url, so an origin-specific request is only possible when we know it.
-    const origins = error.fix === "grant-file" ? ["file:///*"] : /^https?:/.test(tab.url) ? [`${new URL(tab.url).origin}/*`] : [];
-    if (!origins.length) return;
+    // Without host access Chrome hides tab.url; fall back to requesting <all_urls> so the user can grant access in one click.
+    const origins = error.fix === "grant-file" ? ["file:///*"] : /^https?:/.test(tab.url) ? [`${new URL(tab.url).origin}/*`] : ["<all_urls>"];
     const ok = await chrome.permissions.request({ origins }).catch(() => false);
     if (ok) setError(null);
   }, [tab?.id, tab?.url, error?.fix]);
@@ -124,5 +132,5 @@ export function usePageContent(tab: TabInfo | null) {
     [tab?.id, tab?.url],
   );
 
-  return { getPage, error, setError, fix, locate };
+  return { getPage, lastPage, error, setError, fix, locate };
 }

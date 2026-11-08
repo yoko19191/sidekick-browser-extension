@@ -65,7 +65,11 @@ describe("settings defaults", () => {
 });
 
 import { friendlyError } from "@/src/lib/providers";
-import { inferModelMeta } from "@/src/lib/llm";
+import { inferModelMeta, isChatGPTOAuthToken, toPiModel } from "@/src/lib/llm";
+import { generatePKCE, oauthOrigins, parseOAuthCodeInput } from "@/src/lib/oauth";
+import { cleanGeneratedTitle, deriveChatTitle, displayPageTitle } from "@/src/lib/prompts";
+import { hasProviderIcon } from "@/src/ui/components/ProviderIcon";
+
 describe("friendlyError", () => {
   it("maps common failures to readable reasons", () => {
     expect(friendlyError("HTTP 401 {\"error\":\"Incorrect API key\"}")).toMatch(/Key 无效/);
@@ -82,6 +86,101 @@ describe("inferModelMeta", () => {
     expect(inferModelMeta("qwq-32b", "openai-compatible").reasoning).toBe(true);
     expect(inferModelMeta("moonshot-v1-32k", "openai-compatible").contextWindow).toBe(32768);
     expect(inferModelMeta("claude-sonnet-4-5", "anthropic").contextWindow).toBe(200000);
-    expect(inferModelMeta("gemini-2.5-flash", "gemini").contextWindow).toBe(1000000);
+    expect(inferModelMeta("gemini-2.5-flash", "gemini")).toEqual({ reasoning: true, contextWindow: 1000000, maxTokens: 16384 });
+  });
+});
+
+describe("provider icons and OAuth helpers", () => {
+  it("ships LobeHub SVG icons for all named presets (except custom)", () => {
+    for (const p of PRESETS.filter((x) => x.id !== "custom")) {
+      expect(hasProviderIcon(p.id), `icon for ${p.id}`).toBe(true);
+    }
+    expect(hasProviderIcon("custom")).toBe(false);
+  });
+
+  it("includes OAuth-capable presets (including ChatGPT) and origin lists", () => {
+    const oauthPresets = PRESETS.filter((p) => p.oauth);
+    expect(oauthPresets.map((p) => p.id)).toEqual(
+      expect.arrayContaining(["openai", "openrouter", "github-copilot", "kimi-coding", "xai", "anthropic", "meta"]),
+    );
+    for (const p of oauthPresets) {
+      expect(oauthOrigins(p.oauth!).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("detects ChatGPT OAuth JWT tokens and routes toPiModel to openai-codex-responses", () => {
+    const payload = btoa(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_123" } }));
+    const fakeJwt = `eyJhbGciOiJSUzI1NiJ9.${payload}.sig`;
+    expect(isChatGPTOAuthToken(fakeJwt)).toBe(true);
+    expect(isChatGPTOAuthToken("sk-proj-123456")).toBe(false);
+
+    const openaiPreset = newProviderFromPreset(PRESETS.find((p) => p.id === "openai")!);
+    const codexModel = toPiModel(openaiPreset, "gpt-5.3-codex-spark", fakeJwt);
+    expect(codexModel.api).toBe("openai-codex-responses");
+    expect(codexModel.provider).toBe("openai-codex");
+    expect(codexModel.baseUrl).toBe("https://chatgpt.com/backend-api");
+  });
+
+  it("generates valid PKCE verifier/challenge pairs and parses OAuth callback inputs", async () => {
+    const pkce = await generatePKCE();
+    expect(pkce.verifier.length).toBeGreaterThanOrEqual(40);
+    expect(pkce.challenge.length).toBeGreaterThanOrEqual(40);
+    expect(pkce.verifier).not.toBe(pkce.challenge);
+
+    expect(parseOAuthCodeInput("https://openrouter.ai/?sidekick_oauth=1&code=abc123&state=xyz")).toEqual({
+      code: "abc123",
+      state: "xyz",
+    });
+    expect(parseOAuthCodeInput("my-code#my-state")).toEqual({ code: "my-code", state: "my-state" });
+    expect(parseOAuthCodeInput("  raw-code-99  ")).toEqual({ code: "raw-code-99" });
+  });
+
+  it("configures GitHub Copilot headers in toPiModel", () => {
+    const copilot = newProviderFromPreset(PRESETS.find((p) => p.id === "github-copilot")!);
+    const model = toPiModel(copilot, "gpt-4.1");
+    expect(model.provider).toBe("github-copilot");
+    expect(model.headers?.["Copilot-Integration-Id"]).toBe("vscode-chat");
+  });
+
+  it("derives meaningful conversation titles and page titles with domain fallback", () => {
+    expect(displayPageTitle("Building Effective Agents", "https://www.anthropic.com/research/agents", "www.anthropic.com")).toBe("Building Effective Agents");
+    expect(displayPageTitle("https://www.anthropic.com/research/agents", "https://www.anthropic.com/research/agents", "www.anthropic.com")).toBe("www.anthropic.com");
+    expect(displayPageTitle("", "https://www.youtube.com/watch?v=123", "www.youtube.com")).toBe("www.youtube.com");
+
+    // Summary conversation should NOT stay as "总结本页" when assistant response or page title is available
+    expect(
+      deriveChatTitle(
+        [
+          { role: "user", content: "总结本页", kind: "summary" },
+          { role: "assistant", content: "### 关键要点\n- **Anthropic 智能体架构设计指南**：提出简洁可组合模式[^1]", kind: "summary" },
+        ],
+        "Building Effective Agents",
+        "www.anthropic.com",
+      ),
+    ).toBe("Anthropic 智能体架构设计指南");
+
+    expect(
+      deriveChatTitle(
+        [
+          { role: "user", content: "总结本页", kind: "summary" },
+          { role: "assistant", content: "", kind: "summary" },
+        ],
+        "Building Effective Agents",
+        "www.anthropic.com",
+      ),
+    ).toBe("Building Effective Agents");
+
+    expect(
+      deriveChatTitle(
+        [
+          { role: "user", content: "总结本页", kind: "summary" },
+          { role: "assistant", content: "### 关键要点\n- **屋顶花园降温与雨水留存研究**：夏季降温可达三度[^1]", kind: "summary" },
+        ],
+        "",
+        "www.youtube.com",
+      ),
+    ).toBe("屋顶花园降温与雨水留存研究");
+
+    expect(cleanGeneratedTitle('"**Anthropic 智能体构建指南**。"')).toBe("Anthropic 智能体构建指南");
   });
 });

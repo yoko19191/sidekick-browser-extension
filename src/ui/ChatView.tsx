@@ -5,11 +5,12 @@ import { AgentRun } from "./AgentRun";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SafeMarkdown } from "./Markdown";
 import { ConversationStore, type Conversation } from "@/src/lib/db";
-import { DEFAULT_KEYPOINTS_TEMPLATE } from "@/src/lib/prompts";
+import { DEFAULT_KEYPOINTS_TEMPLATE, deriveChatTitle, displayPageTitle } from "@/src/lib/prompts";
 import { keyOptional, modelRef, resolveModelRef } from "@/src/lib/providers";
 import { LANGUAGES, langLabel } from "@/src/lib/settings";
 import type { ChatTurn, DisplayMode, PageContent, ProviderConfig, Settings, TranslateState } from "@/src/lib/types";
 import { Button, cn, Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger, IconButton, Popover, PopoverContent, PopoverTrigger, Segmented, Select, Switch, useToast } from "./components/ui";
+import { ProviderIcon } from "./components/ProviderIcon";
 import { Mascot, type MascotState } from "./mascot/Mascot";
 import { useActiveTab, type TabInfo } from "./hooks";
 import { pageErrorOf, restrictedUrl as restricted, usePageContent } from "./usePageContent";
@@ -34,15 +35,24 @@ interface Msg extends ChatTurn {
 const store = new ConversationStore();
 const newId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
+interface ConvEntry {
+  id: string;
+  messages: Msg[];
+  chatTitle?: string;
+  pageTitle?: string;
+  pageUrl?: string;
+  favIconUrl?: string;
+}
+
 export function ChatView({ settings, update, providers, masked, onSetup }: { settings: Settings; update: (fn: (s: Settings) => Settings) => void; providers: ProviderConfig[]; masked: Record<string, string>; onSetup: () => void }) {
   const tab = useActiveTab();
   const toast = useToast();
-  const [convs, setConvs] = useState<Record<string, { id: string; messages: Msg[] }>>({});
+  const [convs, setConvs] = useState<Record<string, ConvEntry>>({});
   const tabKey = tab ? `${tab.id}` : "none";
   const conv = convs[tabKey] ?? { id: "", messages: [] };
   const messages = conv.messages;
   const setMessages = useCallback(
-    (fn: (m: Msg[]) => Msg[]) => setConvs((c) => ({ ...c, [tabKey]: { id: c[tabKey]?.id || newId(), messages: fn(c[tabKey]?.messages ?? []) } })),
+    (fn: (m: Msg[]) => Msg[]) => setConvs((c) => ({ ...c, [tabKey]: { ...c[tabKey], id: c[tabKey]?.id || newId(), messages: fn(c[tabKey]?.messages ?? []) } })),
     [tabKey],
   );
   const [input, setInput] = useState("");
@@ -86,15 +96,30 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  const effectiveUrl = tab?.url || page.lastPage?.url || conv.pageUrl || "";
+  const host = effectiveUrl && !restricted(effectiveUrl) ? new URL(effectiveUrl).host : "";
+  const effectivePageTitle = displayPageTitle(tab?.title || page.lastPage?.title || conv.pageTitle, effectiveUrl, host);
+  const effectiveFavIcon = tab?.favIconUrl || page.lastPage?.favIconUrl || conv.favIconUrl;
+
   // persist finished conversations (history)
   useEffect(() => {
     if (!tab || !conv.id || !messages.length || messages.some((m) => m.status === "streaming" || m.status === "thinking")) return;
     const now = Date.now();
+    const cleanMsgs = messages.filter((m) => m.status !== "error").map(({ role, content, kind, model }) => ({ role, content, kind, model }));
+    const pageTitleToSave = effectivePageTitle || host || effectiveUrl;
+    const autoTitle = conv.chatTitle || deriveChatTitle(cleanMsgs, pageTitleToSave, host);
     store.put({
-      id: conv.id, url: tab.url, title: tab.title || tab.url, host: restricted(tab.url) ? "" : new URL(tab.url).host,
-      messages: messages.filter((m) => m.status !== "error").map(({ role, content, kind, model }) => ({ role, content, kind, model })), createdAt: now, updatedAt: now,
+      id: conv.id,
+      url: effectiveUrl,
+      title: pageTitleToSave,
+      chatTitle: autoTitle,
+      favIconUrl: effectiveFavIcon,
+      host,
+      messages: cleanMsgs,
+      createdAt: now,
+      updatedAt: now,
     }).catch(() => {});
-  }, [messages, conv.id]);
+  }, [messages, conv.id, conv.chatTitle, effectivePageTitle, effectiveFavIcon, effectiveUrl, host, tab]);
 
   async function send(text: string, kind?: "summary") {
     if (!text.trim() || busy) return;
@@ -118,6 +143,19 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     const content = kind === "summary" || usePage
       ? await page.getPage({ signal: reading.signal, onProgress: (done, total) => patch((x) => ({ ...x, pdfProgress: { done, total } })) })
       : undefined;
+    if (content) {
+      setConvs((c) => ({
+        ...c,
+        [tabKey]: {
+          ...c[tabKey],
+          id: c[tabKey]?.id || newId(),
+          messages: c[tabKey]?.messages ?? [],
+          pageTitle: content.title || c[tabKey]?.pageTitle,
+          pageUrl: content.url || c[tabKey]?.pageUrl,
+          favIconUrl: content.favIconUrl || tab?.favIconUrl || c[tabKey]?.favIconUrl,
+        },
+      }));
+    }
     patch((x) => ({ ...x, pdfProgress: undefined }));
     if (reading.signal.aborted) {
       setBusy(null);
@@ -127,15 +165,38 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
       setBusy(null);
       return patch((x) => ({ ...x, status: "error", error: tr("chat.cannotReadPage") }));
     }
+    let streamedText = "";
+    const needAutoTitle = !conv.chatTitle;
     const h = llm.chat({ task: kind ?? "chat", messages: history, page: content && { title: content.title, url: content.url, markdown: content.markdown, length: content.length, kind: content.kind } }, (e) => {
       if (e.type === "start") patch((x) => ({ ...x, model: e.model }));
       if (e.type === "progress") patch((x) => ({ ...x, progress: { done: e.done, total: e.total } }));
       if (e.type === "coverage") patch((x) => ({ ...x, coverage: e.percent, retrieved: e.retrieved }));
       if (e.type === "thinking") patch((x) => ({ ...x, status: x.content ? x.status : "thinking" }));
-      if (e.type === "delta") patch((x) => ({ ...x, status: "streaming", content: x.content + e.text }));
+      if (e.type === "delta") {
+        streamedText += e.text;
+        patch((x) => ({ ...x, status: "streaming", content: x.content + e.text }));
+      }
       if (e.type === "done") {
         patch((x) => ({ ...x, status: "done" }));
         setBusy(null);
+        if (needAutoTitle && streamedText.trim()) {
+          const titlePage = displayPageTitle(content?.title || effectivePageTitle, content?.url || effectiveUrl, host);
+          const turnList = [...history.map((m) => ({ ...m, kind })), { role: "assistant", content: streamedText, kind }];
+          const immediateTitle = deriveChatTitle(turnList, titlePage, host);
+          setConvs((c) => (c[tabKey] ? { ...c, [tabKey]: { ...c[tabKey], chatTitle: c[tabKey].chatTitle || immediateTitle } } : c));
+          void bg<{ title: string }>({
+            type: "chat:title",
+            messages: turnList,
+            pageTitle: titlePage,
+            host,
+          })
+            .then((r) => {
+              if (r?.title) {
+                setConvs((c) => (c[tabKey] ? { ...c, [tabKey]: { ...c[tabKey], chatTitle: r.title } } : c));
+              }
+            })
+            .catch(() => {});
+        }
       }
       if (e.type === "error") {
         patch((x) => ({ ...x, status: "error", error: e.message }));
@@ -215,7 +276,6 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
     }
   }
 
-  const host = tab && !restricted(tab.url) ? new URL(tab.url).host : "";
   // Without host access (or after an activeTab grant expired) Chrome hides tab.url: the page is still usable once
   // granted, so actions stay enabled and fail into the "grant" strip instead of looking like a browser-internal page.
   const urlHidden = !!tab && !tab.url;
@@ -264,11 +324,11 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {messages.length === 0 ? (
-          <Home mood={mood} tab={tab} host={pageLabel} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
+          <Home mood={mood} tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
             onExplain={explainSelection} onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE)} />
         ) : (
           <>
-            {pageOk && <PageChip tab={tab} host={pageLabel} className="mt-1 bg-card" />}
+            {pageOk && <PageChip tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} className="mt-1 bg-card" />}
             <div className="space-y-5 pt-4">
               {messages.map((m, i) => (
                 <MessageItem key={m.id} m={m} mood={i === messages.length - 1 ? chatMood : undefined} onRetry={() => send(messages[i - 1]?.content ?? "", m.kind)} onLocate={locate} />
@@ -296,6 +356,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
             {pageError.fix === "file-access" && <Button size="sm" variant="outline" onClick={page.fix} testId="open-file-access">{tr("chat.openExtSettings")}</Button>}
             {pageError.fix === "grant-file" && <Button size="sm" variant="outline" onClick={page.fix} testId="grant-file">{tr("chat.allow")}</Button>}
             {pageError.fix === "grant-site" && host && <Button size="sm" variant="outline" onClick={page.fix} testId="grant-site">{tr("chat.allow")}</Button>}
+            {pageError.fix === "grant-site" && !host && <Button size="sm" variant="outline" onClick={page.fix} testId="grant-all">{tr("chat.allow")}</Button>}
             <button onClick={() => setPageError(null)} className="opacity-60 hover:opacity-100" aria-label={tr("common.close")}><X className="size-4" /></button>
           </div>
         )}
@@ -340,7 +401,8 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
             <div className="flex-1" />
             <Dropdown>
               <DropdownTrigger asChild>
-                <button data-testid="model-switch" className="flex h-8 min-w-0 max-w-[55%] items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                <button data-testid="model-switch" className="flex h-8 min-w-0 max-w-[55%] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                  {chatModel && <ProviderIcon presetId={chatModel.provider.presetId} size={14} />}
                   <span className="truncate">{chatModel ? chatModel.modelId : tr("chat.noModel")}</span>
                   <ChevronDown className="size-3.5 shrink-0" />
                 </button>
@@ -349,7 +411,7 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
                 {allModels.length === 0 && <DropdownItem icon={KeyRound} onSelect={onSetup}>{tr("chat.addKey")}</DropdownItem>}
                 {allModels.map(({ p, models }) => (
                   <div key={p.id}>
-                    <DropdownLabel>{p.name}</DropdownLabel>
+                    <DropdownLabel><span className="inline-flex items-center gap-1.5"><ProviderIcon presetId={p.presetId} size={13} />{p.name}</span></DropdownLabel>
                     {models.map((m) => (
                       <DropdownItem key={m} testId={`model-option-${m}`} checked={chatModel?.provider.id === p.id && chatModel.modelId === m}
                         onSelect={() => update((s) => {
@@ -384,7 +446,17 @@ export function ChatView({ settings, update, providers, masked, onSetup }: { set
         <HistoryDrawer
           onClose={() => setHistoryOpen(false)}
           onOpen={(c) => {
-            setConvs((x) => ({ ...x, [tabKey]: { id: c.id, messages: c.messages.map((m, i) => ({ ...m, kind: m.kind as Msg["kind"], id: `${c.id}-${i}`, status: m.role === "assistant" ? "done" : undefined })) } }));
+            setConvs((x) => ({
+              ...x,
+              [tabKey]: {
+                id: c.id,
+                chatTitle: c.chatTitle,
+                pageTitle: c.title,
+                pageUrl: c.url,
+                favIconUrl: c.favIconUrl,
+                messages: c.messages.map((m, i) => ({ ...m, kind: m.kind as Msg["kind"], id: `${c.id}-${i}`, status: m.role === "assistant" ? "done" : undefined })),
+              },
+            }));
             setHistoryOpen(false);
           }}
         />
@@ -402,14 +474,45 @@ function ToolBtn({ icon: Icon, label, on, disabled, onClick, testId }: { icon: t
   );
 }
 
-function PageChip({ tab, host, className }: { tab: TabInfo | null; host: string; className?: string }) {
+function PageFavicon({ favIconUrl, url, host, size = 16, className }: { favIconUrl?: string; url?: string; host?: string; size?: number; className?: string }) {
+  const src = useMemo(() => {
+    if (favIconUrl) return favIconUrl;
+    if (url && /^https?:/.test(url)) {
+      try {
+        const u = new URL(url);
+        if (!/^(127\.0\.0\.1|localhost)$/.test(u.hostname)) return new URL("/favicon.ico", u.origin).href;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (host && !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return `https://${host}/favicon.ico`;
+    return "";
+  }, [favIconUrl, url, host]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (!src || failed) {
+    return <Globe className={cn("shrink-0 text-muted-foreground", className)} style={{ width: size, height: size }} />;
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      onError={() => setFailed(true)}
+      className={cn("shrink-0 rounded-[4px] object-contain", className)}
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+function PageChip({ tab, pageTitle, favIconUrl, host, className }: { tab: TabInfo | null; pageTitle?: string; favIconUrl?: string; host: string; className?: string }) {
+  const titleText = pageTitle || displayPageTitle(tab?.title, tab?.url, host) || host || tr("chat.currentPage");
   return (
     <div className={cn("flex items-center gap-2.5 rounded-card px-3 py-2.5", className)} data-testid="page-chip">
       <span className="grid size-7 shrink-0 place-items-center rounded-[8px] bg-background/80 dark:bg-white/10">
-        {tab?.favIconUrl ? <img src={tab.favIconUrl} className="size-4 rounded-[4px]" alt="" /> : <Globe className="size-4 text-muted-foreground" />}
+        <PageFavicon favIconUrl={favIconUrl || tab?.favIconUrl} url={tab?.url} host={host} size={16} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">{tab?.title || host || tr("chat.currentPage")}</div>
+        <div className="truncate text-[13px] font-medium">{titleText}</div>
         <div className="truncate text-[12px] text-muted-foreground">{host || tr("chat.noAccessYet")}</div>
       </div>
     </div>
@@ -463,7 +566,7 @@ function QuickSettings({ settings, update, tab, host, className }: { settings: S
 }
 
 /** Home / empty state (Kimi-style): mascot + headline, a soft card with the current page, then quick actions. */
-function Home(p: { mood: MascotState; tab: TabInfo | null; host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onExplain: () => void; onKeyPoints: () => void }) {
+function Home(p: { mood: MascotState; tab: TabInfo | null; pageTitle?: string; favIconUrl?: string; host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onExplain: () => void; onKeyPoints: () => void }) {
   const actions = [
     { icon: FileText, label: tr("chat.summarizePage"), onClick: p.onSummarize, testId: "action-summarize" },
     { icon: Languages, label: p.translating ? tr("chat.showOriginal") : tr("chat.translatePage"), onClick: p.onTranslate, testId: "action-translate" },
@@ -475,7 +578,7 @@ function Home(p: { mood: MascotState; tab: TabInfo | null; host: string; pageOk:
       <Mascot state={p.mood} size={60} />
       <h1 className="mt-3 text-[25px] font-semibold leading-[1.3] tracking-tight">{tr("chat.homeTitle")}</h1>
       <div className="mt-5 overflow-hidden rounded-[20px] border border-primary/10 p-1.5 dark:border-white/5" style={{ background: "var(--home-card)" }} data-testid="home-card">
-        {p.pageOk && <PageChip tab={p.tab} host={p.host} className="bg-background/70 dark:bg-black/20" />}
+        {p.pageOk && <PageChip tab={p.tab} pageTitle={p.pageTitle} favIconUrl={p.favIconUrl} host={p.host} className="bg-background/70 dark:bg-black/20" />}
         <div className="px-3 pb-2.5 pt-2.5 text-[13px] leading-6 text-foreground/70">{p.pageOk ? tr("chat.emptyDesc", { lang: p.targetLang }) : tr("chat.emptyRestricted")}</div>
       </div>
       {p.pageOk && (
@@ -577,17 +680,25 @@ function HistoryDrawer({ onClose, onOpen }: { onClose: () => void; onOpen: (c: C
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {list?.length === 0 && <div className="pt-16 text-center text-[13px] text-muted-foreground">{tr("chat.historyEmpty")}</div>}
         <div className="space-y-1.5">
-          {list?.map((c) => (
-            <div key={c.id} className="group flex items-center gap-2 rounded-card bg-card px-3 py-2.5 transition hover:bg-card-strong">
-              <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(c)} data-testid="history-item">
-                <div className="truncate text-[13px] font-medium">{c.messages.find((m) => m.role === "user")?.content || c.title}</div>
-                <div className="mt-0.5 truncate text-[12px] text-muted-foreground">{c.host || tr("chat.noPage")} · {new Date(c.updatedAt).toLocaleString()}</div>
-              </button>
-              <button className="text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100" aria-label={tr("common.delete")} onClick={async () => { await store.delete(c.id); load(); }}>
-                <Trash2 className="size-4" />
-              </button>
-            </div>
-          ))}
+          {list?.map((c) => {
+            const chatTitle = c.chatTitle || deriveChatTitle(c.messages, c.title, c.host);
+            const pageText = displayPageTitle(c.title, c.url, c.host) || c.host || tr("chat.noPage");
+            return (
+              <div key={c.id} className="group flex items-center gap-2 rounded-card bg-card px-3 py-2.5 transition hover:bg-card-strong">
+                <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(c)} data-testid="history-item">
+                  <div className="truncate text-[13px] font-medium" data-testid="history-chat-title">{chatTitle}</div>
+                  <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground" data-testid="history-page-meta">
+                    <PageFavicon favIconUrl={c.favIconUrl} url={c.url} host={c.host} size={14} />
+                    <span className="truncate">{pageText}</span>
+                    <span className="shrink-0">· {new Date(c.updatedAt).toLocaleString()}</span>
+                  </div>
+                </button>
+                <button className="text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100" aria-label={tr("common.delete")} onClick={async () => { await store.delete(c.id); load(); }}>
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
