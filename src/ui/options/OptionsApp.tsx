@@ -485,10 +485,43 @@ function DataSection({ update }: Ctx) {
 }
 
 const MCP_TOOL_GROUPS = [
-  { labelKey: "mcp.catInspect" as const, tools: ["browser_snapshot", "browser_screenshot", "browser_extract", "browser_search_page"] },
-  { labelKey: "mcp.catInteract" as const, tools: ["browser_click", "browser_input", "browser_select_option", "browser_scroll", "browser_send_keys"] },
-  { labelKey: "mcp.catTabs" as const, tools: ["browser_tabs_list", "browser_tab_activate", "browser_tab_open", "browser_tab_close", "browser_navigate", "browser_go_back", "browser_wait"] },
-  { labelKey: "mcp.catAgent" as const, tools: ["browser_run_task"] },
+  {
+    labelKey: "mcp.catInspect" as const,
+    tools: [
+      { name: "browser_snapshot", sig: "{ tabId? }", descKey: "mcp.tool.browser_snapshot" as const },
+      { name: "browser_screenshot", sig: "{ tabId? }", descKey: "mcp.tool.browser_screenshot" as const },
+      { name: "browser_extract", sig: "{ tabId? }", descKey: "mcp.tool.browser_extract" as const },
+      { name: "browser_search_page", sig: "{ pattern, tabId? }", descKey: "mcp.tool.browser_search_page" as const },
+    ],
+  },
+  {
+    labelKey: "mcp.catInteract" as const,
+    tools: [
+      { name: "browser_click", sig: "{ index, tabId? }", descKey: "mcp.tool.browser_click" as const },
+      { name: "browser_input", sig: "{ index, text, clear? }", descKey: "mcp.tool.browser_input" as const },
+      { name: "browser_select_option", sig: "{ index, text }", descKey: "mcp.tool.browser_select_option" as const },
+      { name: "browser_scroll", sig: "{ down, pages?, index? }", descKey: "mcp.tool.browser_scroll" as const },
+      { name: "browser_send_keys", sig: "{ keys, index? }", descKey: "mcp.tool.browser_send_keys" as const },
+    ],
+  },
+  {
+    labelKey: "mcp.catTabs" as const,
+    tools: [
+      { name: "browser_tabs_list", sig: "{}", descKey: "mcp.tool.browser_tabs_list" as const },
+      { name: "browser_tab_activate", sig: "{ tabId }", descKey: "mcp.tool.browser_tab_activate" as const },
+      { name: "browser_tab_open", sig: "{ url, active? }", descKey: "mcp.tool.browser_tab_open" as const },
+      { name: "browser_tab_close", sig: "{ tabId }", descKey: "mcp.tool.browser_tab_close" as const },
+      { name: "browser_navigate", sig: "{ url, tabId? }", descKey: "mcp.tool.browser_navigate" as const },
+      { name: "browser_go_back", sig: "{ tabId? }", descKey: "mcp.tool.browser_go_back" as const },
+      { name: "browser_wait", sig: "{ seconds, tabId? }", descKey: "mcp.tool.browser_wait" as const },
+    ],
+  },
+  {
+    labelKey: "mcp.catAgent" as const,
+    tools: [
+      { name: "browser_run_task", sig: "{ task, tabId? }", descKey: "mcp.tool.browser_run_task" as const },
+    ],
+  },
 ];
 
 function McpBridgeCard() {
@@ -673,21 +706,39 @@ function McpBridgeCard() {
         <TextField label={tr("mcp.token")} value={tokenInput} onChange={setTokenInput} placeholder={tr("mcp.tokenPlaceholder")} mono testId="mcp-token" />
       </div>
 
-      {/* Categorized MCP Tool pills */}
-      <div className="mt-4 rounded-[12px] border border-border/50 bg-background/50 p-3.5">
-        <div className="mb-2.5 text-[12px] font-semibold text-foreground/80">{tr("mcp.toolsTitle")}</div>
-        <div className="space-y-2">
+      {/* Categorized MCP Tool pills with aligned 2-column grid & hover tooltips */}
+      <div className="mt-4 rounded-[14px] border border-border/60 bg-background/60 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-[12.5px] font-semibold text-foreground/85">{tr("mcp.toolsTitle")}</span>
+        </div>
+        <div className="divide-y divide-border/45">
           {MCP_TOOL_GROUPS.map((g) => (
-            <div key={g.labelKey} className="flex flex-wrap items-center gap-1.5">
-              <span className="w-24 shrink-0 text-[11.5px] font-medium text-muted-foreground">{tr(g.labelKey)}</span>
-              {g.tools.map((t) => (
-                <code
-                  key={t}
-                  className="rounded-md border border-border/70 bg-card px-2 py-0.5 font-mono text-[11px] text-foreground/85"
-                >
-                  {t}
-                </code>
-              ))}
+            <div key={g.labelKey} className="grid grid-cols-[100px_1fr] items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+              <span className="pt-1 text-[12px] font-medium text-muted-foreground">{tr(g.labelKey)}</span>
+              <div className="flex flex-wrap gap-1.5">
+                {g.tools.map((t) => {
+                  const desc = tr(t.descKey);
+                  return (
+                    <span
+                      key={t.name}
+                      title={`${t.name}(${t.sig}) — ${desc}`}
+                      data-testid={`mcp-tool-${t.name}`}
+                      className="group relative inline-flex cursor-help items-center rounded-[8px] border border-border/75 bg-card px-2.5 py-1 font-mono text-[11.5px] text-foreground/90 shadow-[0_1px_2px_rgb(0_0_0/0.02)] transition hover:border-primary/45 hover:bg-primary/5 hover:text-primary"
+                    >
+                      {t.name}
+                      <span
+                        role="tooltip"
+                        className="pointer-events-none invisible absolute bottom-full left-1/2 z-30 mb-2 w-60 -translate-x-1/2 translate-y-1 rounded-[10px] border border-border/60 bg-popover p-2.5 font-sans text-left opacity-0 shadow-float transition-all duration-150 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100"
+                      >
+                        <span className="block font-mono text-[11px] font-semibold text-primary">
+                          {t.name} <span className="font-normal text-muted-foreground">{t.sig}</span>
+                        </span>
+                        <span className="mt-1 block text-[11.5px] leading-4 text-foreground/90">{desc}</span>
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
