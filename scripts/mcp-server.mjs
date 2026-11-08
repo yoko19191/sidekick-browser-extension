@@ -623,8 +623,9 @@ async function main() {
   }
 
   let stdinBuf = "";
+  let queue = Promise.resolve();
   process.stdin.setEncoding("utf8");
-  process.stdin.on("data", async (chunk) => {
+  process.stdin.on("data", (chunk) => {
     stdinBuf += chunk;
     while (true) {
       const nl = stdinBuf.indexOf("\n");
@@ -632,13 +633,15 @@ async function main() {
       const line = stdinBuf.slice(0, nl).trim();
       stdinBuf = stdinBuf.slice(nl + 1);
       if (!line || line.startsWith("Content-Length:")) continue;
-      try {
-        const req = JSON.parse(line);
-        const res = await handleMcpJsonRpc(req, callFn);
-        if (res) process.stdout.write(`${JSON.stringify(res)}\n`);
-      } catch {
-        /* ignore malformed line */
-      }
+      queue = queue.then(async () => {
+        try {
+          const req = JSON.parse(line);
+          const res = await handleMcpJsonRpc(req, callFn);
+          if (res) process.stdout.write(`${JSON.stringify(res)}\n`);
+        } catch {
+          /* ignore malformed line */
+        }
+      });
     }
   });
 }
