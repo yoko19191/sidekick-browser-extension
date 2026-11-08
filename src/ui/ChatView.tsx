@@ -1,7 +1,9 @@
 import {
-  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, Plus, RotateCcw, ScanText, Settings2, Square, Sun, TextQuote, Trash2, X,
+  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, Plus, RotateCcw, ScanText, Settings2, Sparkles, Square, Sun, TextQuote, Trash2, X,
 } from "lucide-react";
 import { AgentRun } from "./AgentRun";
+import type { RunOutcome } from "@/src/agent/loop";
+import type { StepRecord } from "@/src/agent/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SafeMarkdown } from "./Markdown";
 import { ConversationStore, type Conversation } from "@/src/lib/db";
@@ -21,7 +23,7 @@ import { tr } from "@/src/i18n";
 
 interface Msg extends ChatTurn {
   id: string;
-  kind?: "summary";
+  kind?: "summary" | "agent";
   status?: "streaming" | "thinking" | "done" | "error";
   model?: string;
   error?: string;
@@ -31,6 +33,14 @@ interface Msg extends ChatTurn {
   coverage?: number; // % of a very long page that the summary covers (only set when truncated)
   /** true: chat on a long page answered from retrieved excerpts (coverage = their share); false: from the head. */
   retrieved?: boolean;
+  /** Inline Browser-Use Agent run state embedded in the conversation stream. */
+  agentRun?: {
+    tabId: number;
+    task: string;
+    key: number;
+    steps?: StepRecord[];
+    outcome?: RunOutcome;
+  };
 }
 
 const store = new ConversationStore();
@@ -107,6 +117,7 @@ export function ChatView({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SidebarSettingsPage | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [agentMode, setAgentMode] = useState(false);
   const [agentTask, setAgentTask] = useState<{ tabId: number; task: string; key: number } | null>(null);
   const [flash, setFlash] = useState<"done" | "surprised" | null>(null); // brief mascot reactions
   const flashTimer = useRef(0);
@@ -236,16 +247,28 @@ export function ChatView({
     }
   }
 
-  async function send(text: string, kind?: "summary", overrideAttachments?: ChatAttachment[]) {
+  async function send(text: string, kind?: "summary" | "agent", overrideAttachments?: ChatAttachment[]) {
     const activeAttachments = overrideAttachments ?? (kind === "summary" ? [] : attachments);
     if ((!text.trim() && activeAttachments.length === 0) || busy) return;
     if (!configured) return onSetup();
     const cmd = tr("agent.command");
-    if (!kind && (text.trim().startsWith(cmd) || text.trim().startsWith("/act"))) {
+    const isExplicitCmd = !kind && (text.trim().startsWith(cmd) || text.trim().startsWith("/act"));
+    if (kind === "agent" || isExplicitCmd || (!kind && agentMode)) {
       const task = text.trim().replace(cmd, "").replace(/^\/act/, "").trim();
       if (!task || !tab?.id) return setPageError(tr("agent.usage"));
+      const nowKey = Date.now();
+      const user: Msg = { id: `u${nowKey}`, role: "user", content: task, kind: "agent" };
+      const asst: Msg = {
+        id: `a${nowKey}`,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        kind: "agent",
+        agentRun: { tabId: tab.id, task, key: nowKey },
+      };
+      setMessages((m) => [...m, user, asst]);
       setInput("");
-      return setAgentTask({ tabId: tab.id, task, key: Date.now() });
+      return;
     }
     const user: Msg = {
       id: `u${Date.now()}`,
@@ -475,6 +498,20 @@ export function ChatView({
                   onRetry={() => send(messages[i - 1]?.content ?? "", m.kind, messages[i - 1]?.attachments)}
                   onLocate={locate}
                   onPreviewAttachment={setPreviewAtt}
+                  onAgentFinish={(outcome, steps) => {
+                    setMessages((list) =>
+                      list.map((x) =>
+                        x.id === m.id
+                          ? {
+                              ...x,
+                              status: "done",
+                              content: outcome.status === "done" && outcome.text ? outcome.text : x.content,
+                              agentRun: x.agentRun ? { ...x.agentRun, steps, outcome } : undefined,
+                            }
+                          : x,
+                      ),
+                    );
+                  }}
                 />
               ))}
             </div>
@@ -528,7 +565,12 @@ export function ChatView({
               void addFiles(e.dataTransfer.files);
             }
           }}
-          className="rounded-[22px] border border-border bg-background shadow-[0_1px_3px_rgb(16_24_40/0.05)] transition focus-within:border-primary/45 focus-within:ring-2 focus-within:ring-ring/40 dark:bg-card"
+          className={cn(
+            "rounded-[22px] border bg-background shadow-[0_1px_3px_rgb(16_24_40/0.05)] transition focus-within:ring-2 dark:bg-card",
+            agentMode
+              ? "border-primary/50 focus-within:border-primary focus-within:ring-primary/30"
+              : "border-border focus-within:border-primary/45 focus-within:ring-ring/40",
+          )}
         >
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-3 pb-0.5" data-testid="composer-attachments">
@@ -560,7 +602,7 @@ export function ChatView({
                 send(input);
               }
             }}
-            placeholder={tr("chat.placeholder")}
+            placeholder={agentMode ? tr("agent.placeholder") : tr("chat.placeholder")}
             className="block max-h-40 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
           />
           <input
@@ -578,6 +620,22 @@ export function ChatView({
             <ToolBtn icon={Plus} label={tr("chat.addAttachment")} onClick={() => fileInputRef.current?.click()} testId="attach-file" />
             <ToolBtn icon={FileText} label={tr("chat.usePage")} on={usePage && pageOk} disabled={!pageOk} onClick={() => setUsePage((v) => !v)} testId="use-page" />
             <ToolBtn icon={TextQuote} label={tr("chat.quoteSelection")} disabled={!pageOk} onClick={quoteSelection} testId="quote-selection" />
+            <button
+              type="button"
+              onClick={() => setAgentMode((v) => !v)}
+              title={tr("agent.modeTip")}
+              aria-pressed={agentMode}
+              data-testid="agent-mode-toggle"
+              className={cn(
+                "inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition",
+                agentMode
+                  ? "bg-primary text-primary-foreground shadow-2xs"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Sparkles className="size-3.5 shrink-0" />
+              <span>{tr("agent.modeLabel")}</span>
+            </button>
             <div className="flex-1" />
             <Dropdown>
               <DropdownTrigger asChild>
@@ -849,12 +907,14 @@ function MessageItem({
   onRetry,
   onLocate,
   onPreviewAttachment,
+  onAgentFinish,
 }: {
   m: Msg;
   mood?: MascotState;
   onRetry: () => void;
   onLocate: (text: string) => void;
   onPreviewAttachment: (att: ChatAttachment) => void;
+  onAgentFinish?: (outcome: RunOutcome, steps: StepRecord[]) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -885,11 +945,36 @@ function MessageItem({
         )}
         {m.content && (
           <div className="max-w-[85%] whitespace-pre-wrap rounded-card rounded-br-[6px] bg-primary-soft px-3.5 py-2 text-[14px] leading-6 text-foreground">
-            {m.kind === "summary" ? <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{m.content}</span> : m.content}
+            {m.kind === "summary" ? (
+              <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{m.content}</span>
+            ) : m.kind === "agent" ? (
+              <span className="flex items-center gap-1.5"><Sparkles className="size-3.5 text-primary shrink-0" /><span>{m.content}</span></span>
+            ) : (
+              m.content
+            )}
           </div>
         )}
       </div>
     );
+  if (m.agentRun) {
+    return (
+      <div className="animate-in space-y-2.5" data-testid="assistant-message" data-status={m.status}>
+        <AgentRun
+          key={m.agentRun.key}
+          tabId={m.agentRun.tabId}
+          task={m.agentRun.task}
+          initialSteps={m.agentRun.steps}
+          initialOutcome={m.agentRun.outcome}
+          onFinish={onAgentFinish}
+        />
+        {m.content && (
+          <div ref={ref} onClick={onClick} className="md pt-0.5" data-testid="assistant-content">
+            <SafeMarkdown>{m.content}</SafeMarkdown>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="animate-in" data-testid="assistant-message" data-status={m.status}>
       <Mascot state={mood ?? "idle"} still={!mood} size={22} className="mb-1.5" />

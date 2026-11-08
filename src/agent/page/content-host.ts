@@ -370,13 +370,13 @@ export async function handleAgentMessage(msg: AgentPageMessage): Promise<{ ok: t
         showAgentVisual({ index, action: "input" });
       } else if (a.name === "select_option") {
         showAgentVisual({ index, action: "select_option" });
-      } else if (a.name === "click") {
-        showAgentVisual({ index, action: "click" });
+      } else if (a.name === "click" || a.name === "hover") {
+        showAgentVisual({ index, action: a.name });
       } else if (a.name === "extract" || a.name === "search_page") {
         showAgentVisual({ action: a.name });
       }
       const res = await get().execute(a);
-      if (index && (a.name === "click" || a.name === "input" || a.name === "select_option")) {
+      if (index && (a.name === "click" || a.name === "hover" || a.name === "input" || a.name === "select_option")) {
         // Refresh bounding box position after scrollIntoView / DOM focus inside execute()
         showAgentVisual({ index, action: a.name });
       }

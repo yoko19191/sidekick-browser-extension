@@ -246,7 +246,16 @@ export class PageObserver {
     const newIds = [...seen].filter((id) => !this.lastIds.has(id));
     this.lastIds = seen;
     this.mutations = 0;
-    return { url: this.doc.location?.href ?? "", title: this.doc.title, tree: lines.join("\n"), newIds };
+    const win = this.doc.defaultView;
+    const scroller = (this.doc.scrollingElement ?? this.doc.documentElement) as HTMLElement | null;
+    const scrollY = Math.max(0, Math.round(win?.scrollY ?? scroller?.scrollTop ?? 0));
+    const innerH = Math.max(0, Math.round(win?.innerHeight ?? scroller?.clientHeight ?? 0));
+    const scrollH = Math.max(innerH, Math.round(scroller?.scrollHeight ?? innerH));
+    const viewport = {
+      pixelsAbove: scrollY,
+      pixelsBelow: Math.max(0, scrollH - scrollY - innerH),
+    };
+    return { url: this.doc.location?.href ?? "", title: this.doc.title, tree: lines.join("\n"), newIds, viewport };
   }
 
   private sameOrigin(f: HTMLIFrameElement): boolean {
@@ -304,13 +313,25 @@ export class PageObserver {
           seen.scrollIntoView?.({ block: "center" });
           if (isOccluded(seen)) return { ok: false, message: `element ${args.index} is covered by another element; close the overlay first` };
           el!.focus?.();
-          const restore = retargetToThisTab(el!, true);
+          const restore = args.allowNewTab ? undefined : retargetToThisTab(el!, true);
           try {
             el!.click();
           } finally {
             restore?.();
           }
           return { ok: true, message: restore ? `clicked ${args.index}; it opens a new tab, so it was opened in this tab instead (go_back returns)` : `clicked ${args.index}` };
+        }
+        case "hover": {
+          const seen = box(el!);
+          seen.scrollIntoView?.({ block: "center" });
+          const r = (seen as HTMLElement).getBoundingClientRect?.() ?? { left: 0, top: 0, width: 0, height: 0 };
+          const clientX = Math.round(r.left + r.width / 2);
+          const clientY = Math.round(r.top + r.height / 2);
+          for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter", "mousemove"]) {
+            const Ev = win.MouseEvent ?? MouseEvent;
+            seen.dispatchEvent(new Ev(type, { bubbles: true, cancelable: true, clientX, clientY }));
+          }
+          return { ok: true, message: `hovered ${args.index}` };
         }
         case "input": {
           if (isSensitive(el!)) return { ok: false, message: "refused: sensitive field" };

@@ -63,9 +63,12 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
     case "wait":
     case "extract":
     case "search_page":
+    case "hover":
+    case "screenshot":
       return { level: 0, reason: "read-only" };
 
-    case "navigate": {
+    case "navigate":
+    case "open_tab": {
       const url = String(a.url ?? "");
       if (!/^https?:\/\//i.test(url)) return { level: 3, reason: "only http(s) URLs are allowed" };
       if (isForbiddenUrl(url, never)) return { level: 3, reason: "target site is on the never-act list" };
@@ -73,7 +76,9 @@ export function classify(action: ActionRequest, target: ElementInfo | undefined,
       return { level: 1, reason: "same-site navigation" };
     }
     case "go_back":
-      return { level: 1, reason: "go back" };
+    case "switch_tab":
+    case "close_tab":
+      return { level: 1, reason: "tab or history navigation" };
   }
 
   if (target?.sensitive) return { level: 3, reason: "password, payment or one-time-code fields must be filled by the user" };

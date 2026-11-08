@@ -1,5 +1,7 @@
 /** Service-worker side of a web-action run: owns the WebAgent, the model key and the tab driver. */
 import { WebAgent } from "./loop";
+import { hasDebuggerPermission } from "./cdp";
+import { loadBridgeConfig } from "./mcp-bridge";
 import { TabDriver } from "./tab-driver";
 import type { AgentEvent, AgentRequest } from "./protocol";
 import type { ConfirmDecision } from "./types";
@@ -78,7 +80,10 @@ export function attachAgentPort(port: chrome.runtime.Port, deps: SwDeps) {
         model: toPiModel(r.provider, r.modelId, r.apiKey),
         streamFn: agentStreamFn(r.provider.kind),
         getApiKey: () => r.apiKey,
-        driver: new TabDriver(req.tabId, deps.ensureInjected),
+        driver: new TabDriver(req.tabId, deps.ensureInjected, {
+          autoFollowNewTab: true,
+          useCdp: async () => Boolean((await loadBridgeConfig()).cdpEnabled && (await hasDebuggerPermission())),
+        }),
         never,
         allowedKinds: policy?.allowKinds,
         hooks: {

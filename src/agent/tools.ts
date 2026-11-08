@@ -7,32 +7,40 @@ const Index = Type.String({ description: 'Element id from <browser_state>, e.g. 
 
 export const ACTION_SCHEMAS = {
   click: Type.Object({ index: Index }),
+  hover: Type.Object({ index: Index }),
   input: Type.Object({ index: Index, text: Type.String(), clear: Type.Optional(Type.Boolean()) }),
   select_option: Type.Object({ index: Index, text: Type.String() }),
   scroll: Type.Object({ down: Type.Boolean(), pages: Type.Optional(Type.Number({ minimum: 0.5, maximum: 3 })), index: Type.Optional(Index) }),
   send_keys: Type.Object({ keys: Type.Union(["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].map((k) => Type.Literal(k))), index: Type.Optional(Index) }),
   navigate: Type.Object({ url: Type.String() }),
   go_back: Type.Object({}),
+  switch_tab: Type.Object({ tabId: Type.Number({ description: "Target tabId from <open_tabs> in <browser_state>" }) }),
+  open_tab: Type.Object({ url: Type.String({ description: "http(s) URL to open in a new tab and switch to" }) }),
+  close_tab: Type.Object({ tabId: Type.Optional(Type.Number({ description: "Tab id to close (defaults to current tab)" })) }),
   wait: Type.Object({ seconds: Type.Number({ minimum: 0, maximum: 10 }) }),
   extract: Type.Object({ query: Type.String() }),
   search_page: Type.Object({ pattern: Type.String() }),
 } satisfies Record<string, TSchema>;
 
 const DESCRIPTIONS: Record<keyof typeof ACTION_SCHEMAS, string> = {
-  click: "Click an element by its id.",
+  click: "Click an element by its id. If it opens a new tab, the agent automatically switches to the new tab.",
+  hover: "Hover over an element by its id to reveal dropdown menus, tooltips, or submenus.",
   input: "Type text into an input/textarea/contenteditable by id. clear=true replaces existing text.",
   select_option: "Choose an option of a <select> by its visible text.",
   scroll: "Scroll the page (or the element with the given id) up or down by up to 3 pages.",
   send_keys: "Press a single key, optionally focused on an element.",
   navigate: "Open an http(s) URL in the current tab. Ends the current step.",
   go_back: "Go back in history. Ends the current step.",
+  switch_tab: "Switch the agent's active tab to another open tab by tabId. Ends the current step.",
+  open_tab: "Open an http(s) URL in a new tab and switch the agent to it. Ends the current step.",
+  close_tab: "Close a tab (defaults to current tab) and switch back. Ends the current step.",
   wait: "Wait up to 10 seconds for the page to settle.",
   extract: "Read the main content of the page and answer the query from it.",
   search_page: "Find text matching a pattern on the page and report where it is.",
 };
 
-/** Actions that change the document; anything queued after them in the same step is dropped. */
-export const TERMINATES = new Set(["navigate", "go_back", "done"]);
+/** Actions that change the document or active tab; anything queued after them in the same step is dropped. */
+export const TERMINATES = new Set(["navigate", "go_back", "switch_tab", "open_tab", "close_tab", "done"]);
 
 function text(t: string, isError = false): AgentToolResult<undefined> {
   return { content: [{ type: "text", text: t }], details: undefined, isError };
@@ -52,6 +60,31 @@ export function buildTools(driver: PageDriver, hooks: AgentHooks): AgentTool<any
       },
     }),
   );
+  const screenshot: AgentTool<any> = {
+    name: "screenshot",
+    label: "screenshot",
+    description: "Capture a visual screenshot of the current viewport when the DOM tree is ambiguous, visual layout matters, or an action did not work as expected.",
+    parameters: Type.Object({ reason: Type.Optional(Type.String({ description: "Brief reason for taking a screenshot" })) }),
+    executionMode: "sequential",
+    async execute(_id, _params, signal) {
+      if (!driver.screenshot) {
+        return text("screenshot is not supported by the current page driver", true);
+      }
+      try {
+        const shot = await driver.screenshot(signal);
+        return {
+          content: [
+            { type: "text", text: "Captured current viewport screenshot." },
+            { type: "image", data: shot.data, mimeType: shot.mimeType },
+          ],
+          details: undefined,
+          isError: false,
+        };
+      } catch (e) {
+        return text(`screenshot failed: ${(e as Error)?.message ?? String(e)}`, true);
+      }
+    },
+  };
   const askUser: AgentTool<any> = {
     name: "ask_user",
     label: "ask_user",
@@ -75,5 +108,5 @@ export function buildTools(driver: PageDriver, hooks: AgentHooks): AgentTool<any
       return { ...text(p.text), details: { success: p.success }, terminate: true };
     },
   };
-  return [...actions, askUser, done];
+  return [...actions, screenshot, askUser, done];
 }

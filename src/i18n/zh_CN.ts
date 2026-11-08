@@ -430,4 +430,10 @@ export const zh_CN = {
   "chat.removeAttachment": "移除附件",
   "chat.chars": "字符",
   "chat.pastedLongText": "已将长文本（{count} 字符）转为附件卡片",
+  "agent.modeLabel": "Agent",
+  "agent.modeTip": "切换 Browser Use 网页操作 Agent 模式（开启后直接发送指令即可自动操控浏览器）",
+  "agent.placeholder": "描述你要在浏览器中执行的任务（如：在 B 站搜索并播放视频）…",
+  "agent.stepsHeader": "步骤",
+  "agent.stepsCompleted": "已完成 {done}/{total}",
+  "agent.stepsRunning": "正在执行第 {n} 步…",
 } as const;

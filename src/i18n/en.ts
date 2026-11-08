@@ -428,4 +428,10 @@ export const en: Catalog = {
   "chat.removeAttachment": "Remove attachment",
   "chat.chars": "chars",
   "chat.pastedLongText": "Converted long text ({count} chars) into attachment",
+  "agent.modeLabel": "Agent",
+  "agent.modeTip": "Toggle Browser Use Agent mode (send instructions to directly operate the browser)",
+  "agent.placeholder": "Describe the browser task to execute (e.g. search and play a video)…",
+  "agent.stepsHeader": "Steps",
+  "agent.stepsCompleted": "Completed {done}/{total}",
+  "agent.stepsRunning": "Executing step {n}…",
 };

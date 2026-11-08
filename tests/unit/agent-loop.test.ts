@@ -422,3 +422,47 @@ describe("abort reasons", () => {
     expect((signal()?.reason as Error).name).toBe("TimeoutError");
   });
 });
+
+describe("Browser Use tools (hover, multi-tab, screenshot, viewport)", () => {
+  it("executes hover, open_tab, switch_tab, close_tab and injects <open_tabs> and viewport info", async () => {
+    const { agent, page, seen } = setup([
+      turn(call("hover", { index: "f0:1" })),
+      turn(call("open_tab", { url: "https://shop.example.com/cart" })),
+      turn(call("switch_tab", { tabId: 2 })),
+      turn(call("close_tab", {})),
+      turn(call("done", { text: "multi-tab ok", success: true })),
+    ], { "f0:1": { index: "f0:1", tag: "button", text: "Menu" } });
+    (agent as any).opts.driver.snapshot = async () => ({
+      url: "https://shop.example.com/",
+      title: "Shop",
+      tree: "[f0:1] button \"Menu\"",
+      viewport: { scrollY: 120, viewportHeight: 800, documentHeight: 2000, pixelsAbove: 120, pixelsBelow: 1080 },
+      tabs: [
+        { id: 1, title: "Shop", url: "https://shop.example.com/", active: true },
+        { id: 2, title: "Cart", url: "https://shop.example.com/cart", active: false },
+      ],
+    });
+    const r = await agent.run("inspect menu and tabs");
+    expect(r.status).toBe("done");
+    expect(page.executed).toEqual(["hover", "open_tab", "switch_tab", "close_tab"]);
+    expect(seen[0]).toContain("120px above, 1080px below");
+    expect(seen[0]).toContain("<open_tabs>");
+    expect(seen[0]).toContain("[tabId=1 *current*]");
+    expect(seen[0]).toContain("[tabId=2]");
+  });
+
+  it("executes screenshot tool when driver supports screenshot()", async () => {
+    const { agent, seen } = setup([
+      turn(call("screenshot", {})),
+      turn(call("done", { text: "saw screenshot", success: true })),
+    ]);
+    (agent as any).opts.driver.screenshot = vi.fn(async () => ({
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      mimeType: "image/jpeg",
+    }));
+    const r = await agent.run("take a screenshot");
+    expect(r.status).toBe("done");
+    expect((agent as any).opts.driver.screenshot).toHaveBeenCalledOnce();
+    expect(seen[1]).toContain("Captured current viewport screenshot.");
+  });
+});

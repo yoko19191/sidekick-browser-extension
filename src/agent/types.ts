@@ -20,6 +20,18 @@ export interface ElementInfo {
   formSubmitText?: string;
 }
 
+export interface PageTabSummary {
+  id: number;
+  title: string;
+  url: string;
+  active: boolean;
+}
+
+export interface PageViewportInfo {
+  pixelsAbove: number;
+  pixelsBelow: number;
+}
+
 export interface PageSnapshot {
   url: string;
   title: string;
@@ -27,6 +39,10 @@ export interface PageSnapshot {
   tree: string;
   /** Ids that appeared since the previous snapshot. */
   newIds?: string[];
+  /** Scrollable pixels above and below the current viewport. */
+  viewport?: PageViewportInfo;
+  /** Open tabs in the browser window (for multi-tab awareness). */
+  tabs?: PageTabSummary[];
 }
 
 export interface ActionRequest {
@@ -47,6 +63,8 @@ export interface PageDriver {
   currentUrl(): Promise<string>;
   /** Optional: true when the DOM changed substantially since the last snapshot (modal opened, SPA view swap). */
   domChanged?(): Promise<boolean>;
+  /** Optional: capture a base64 JPEG screenshot of the current viewport for multimodal inspection. */
+  screenshot?(signal?: AbortSignal): Promise<{ data: string; mimeType: string }>;
 }
 
 export interface ConfirmRequest {

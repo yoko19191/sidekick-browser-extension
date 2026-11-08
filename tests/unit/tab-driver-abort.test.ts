@@ -60,4 +60,14 @@ describe("script popups", () => {
     const r = await new TabDriver(1, async () => {}).execute({ name: "click", args: { index: "f0:1" } });
     expect(r.message).toBe("clicked f0:1");
   });
+
+  it("auto-follows a newly opened tab when autoFollowNewTab is enabled", async () => {
+    mockChrome((fire) => {
+      setTimeout(() => fire({ id: 42, openerTabId: 1, pendingUrl: "https://shop.example.com/item" }), 10);
+    });
+    const d = new TabDriver(1, async () => {}, { autoFollowNewTab: true });
+    const r = await d.execute({ name: "click", args: { index: "f0:1" } });
+    expect(d.activeTabId).toBe(42);
+    expect(r.message).toContain("switched to newly opened tab #42");
+  });
 });
