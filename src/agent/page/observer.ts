@@ -3,6 +3,7 @@
  * so it can be unit-tested with jsdom. Walks open shadow roots and same-origin iframes.
  */
 import type { ActionRequest, ActionResult, ElementInfo, PageSnapshot } from "../types";
+import { extractVideoTranscriptMarkdown } from "../../lib/video-subtitles";
 import {
   box,
   clean,
@@ -424,13 +425,16 @@ export class PageObserver {
           await new Promise((r) => setTimeout(r, Math.min(10, Number(args.seconds)) * 1000));
           return { ok: true, message: `waited ${args.seconds}s` };
         case "extract": {
+          const transcript = await extractVideoTranscriptMarkdown(this.doc).catch(() => null);
           const main = this.doc.querySelector("main, article, [role=main]") ?? this.doc.body;
-          const text = clean((main as HTMLElement).innerText ?? main.textContent, 8000);
+          const pageText = clean((main as HTMLElement).innerText ?? main.textContent, transcript ? 4000 : 8000);
+          const text = transcript ? `${transcript.slice(0, 14000)}\n\n${pageText}` : pageText;
           return { ok: true, message: `<untrusted_page_content>${text.replace(/</g, "‹").replace(/>/g, "›")}</untrusted_page_content>` };
         }
         case "search_page": {
+          const transcript = await extractVideoTranscriptMarkdown(this.doc).catch(() => null);
           const re = new RegExp(String(args.pattern).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-          const body = (this.doc.body as HTMLElement).innerText ?? this.doc.body.textContent ?? "";
+          const body = `${transcript ? `${transcript}\n` : ""}${(this.doc.body as HTMLElement).innerText ?? this.doc.body.textContent ?? ""}`;
           const hits: string[] = [];
           for (const line of body.split(/\n+/)) if (re.test(line) && hits.length < 10) hits.push(clean(line, 160));
           return { ok: true, message: hits.length ? hits.map((h) => `- ${h}`).join("\n").replace(/</g, "‹").replace(/>/g, "›") : "no match" };

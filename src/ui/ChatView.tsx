@@ -1,5 +1,5 @@
 import {
-  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, Plus, RotateCcw, ScanText, Settings2, Sparkles, Square, Sun, TextQuote, Trash2, X,
+  ArrowRight, ArrowUp, Check, Info, ChevronDown, Copy, Crosshair, FileText, Globe, History, KeyRound, Languages, ListChecks, Loader2, Lock, MessageSquarePlus, Moon, Plus, RotateCcw, ScanText, Settings2, Sparkles, Square, Sun, TextQuote, Trash2, Video, X,
 } from "lucide-react";
 import { AgentRun } from "./AgentRun";
 import type { RunOutcome } from "@/src/agent/loop";
@@ -18,6 +18,7 @@ import { useActiveTab, type TabInfo, type useProviders } from "./hooks";
 import { SidebarSettings, type SidebarSettingsPage } from "./SidebarSettings";
 import { pageErrorOf, restrictedUrl as restricted, usePageContent } from "./usePageContent";
 import { isFileUrl } from "@/src/lib/pdf/bytes";
+import { isVideoWatchUrl } from "@/src/lib/video-subtitles";
 import { bg, llm } from "./messaging";
 import { tr } from "@/src/i18n";
 
@@ -359,6 +360,7 @@ export function ChatView({
     setBusy({ abort: h.abort });
   }
   const summarize = () => send(tr("chat.summarizePage"), "summary");
+  const summarizeVideo = () => send(tr("chat.summarizeVideo"), "summary");
 
   // hand-offs from the page (context menu "summarize", selection card "ask in panel")
   useEffect(() => {
@@ -437,6 +439,7 @@ export function ChatView({
   const pageLabel = host || (local ? tr("chat.localFile") : "");
   const needsGrant = !!pageError?.fix;
   const translating = !!tstate?.active;
+  const videoAvailable = Boolean(tstate?.videoSubtitlesAvailable || isVideoWatchUrl(effectiveUrl));
   const allModels = providers.filter((p) => p.enabled && usable(p)).map((p) => ({ p, models: p.models }));
 
   // ---- mascot expression, driven by real app events ----
@@ -485,7 +488,7 @@ export function ChatView({
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {messages.length === 0 ? (
-          <Home mood={mood} tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} pageOk={pageOk} translating={translating} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onTranslate={toggleTranslate}
+          <Home mood={mood} tab={tab} pageTitle={effectivePageTitle} favIconUrl={effectiveFavIcon} host={pageLabel} pageOk={pageOk} translating={translating} videoAvailable={videoAvailable} targetLang={langLabel(settings.translation.targetLang)} onSummarize={summarize} onSummarizeVideo={summarizeVideo} onTranslate={toggleTranslate}
             onExplain={explainSelection} onKeyPoints={() => send(settings.prompts.keyPoints.trim() || DEFAULT_KEYPOINTS_TEMPLATE, "summary")} />
         ) : (
           <>
@@ -773,8 +776,9 @@ function PageChip({ tab, pageTitle, favIconUrl, host, className }: { tab: TabInf
 }
 
 /** Home / empty state (Kimi-style): mascot + headline, a soft card with the current page, then quick actions. */
-function Home(p: { mood: MascotState; tab: TabInfo | null; pageTitle?: string; favIconUrl?: string; host: string; pageOk: boolean; translating: boolean; targetLang: string; onSummarize: () => void; onTranslate: () => void; onExplain: () => void; onKeyPoints: () => void }) {
+function Home(p: { mood: MascotState; tab: TabInfo | null; pageTitle?: string; favIconUrl?: string; host: string; pageOk: boolean; translating: boolean; videoAvailable?: boolean; targetLang: string; onSummarize: () => void; onSummarizeVideo: () => void; onTranslate: () => void; onExplain: () => void; onKeyPoints: () => void }) {
   const actions = [
+    ...(p.videoAvailable ? [{ icon: Video, label: tr("chat.summarizeVideo"), onClick: p.onSummarizeVideo, testId: "action-summarize-video" }] : []),
     { icon: FileText, label: tr("chat.summarizePage"), onClick: p.onSummarize, testId: "action-summarize" },
     { icon: Languages, label: p.translating ? tr("chat.showOriginal") : tr("chat.translatePage"), onClick: p.onTranslate, testId: "action-translate" },
     { icon: ScanText, label: tr("chat.explainSelection"), onClick: p.onExplain, testId: "action-explain" },

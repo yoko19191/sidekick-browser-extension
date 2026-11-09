@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag name (e.g. v0.1.0; defaults to v<package.json version>)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -13,27 +19,65 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
+
       - run: npm ci
-      - name: Verify tag matches package.json version
+
+      - name: Resolve release tag & verify version
+        id: meta
         run: |
-          PKG="v$(node -p "require('./package.json').version")"
-          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG"
+          PKG_VER="$(node -p "require('./package.json').version")"
+          PKG_TAG="v${PKG_VER}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              TAG="$PKG_TAG"
+            fi
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          if [ "$TAG" != "$PKG_TAG" ]; then
+            echo "::error::Tag $TAG does not match package.json version $PKG_TAG"
             exit 1
           fi
-      - run: npm test
-      - name: Build and zip
-        run: npm run zip
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$PKG_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build ZIP and pack CRX3 (.crx)
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: npm run crx
+
       - name: Permission guard
         run: npm run check:permissions
-      - name: Publish GitHub Release
+
+      - name: Upload build artifacts (.crx & .zip)
+        uses: actions/upload-artifact@v7
+        with:
+          name: sidekick-${{ steps.meta.outputs.tag }}
+          path: |
+            .output/*.crx
+            .output/*.zip
+          retention-days: 30
+
+      - name: Publish GitHub Release with CRX and ZIP
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" .output/*.zip \
-            --title "翻翻 Sidekick $GITHUB_REF_NAME" \
-            --generate-notes
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" .output/*.crx .output/*.zip --clobber
+          else
+            gh release create "$TAG" .output/*.crx .output/*.zip \
+              --title "翻翻 Sidekick $TAG" \
+              --generate-notes
+          fi

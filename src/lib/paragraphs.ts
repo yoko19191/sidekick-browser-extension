@@ -68,6 +68,236 @@ export function collectParagraphs(root: Element, opts: CollectOptions = {}): Par
   return out;
 }
 
+export interface HoverParagraphMatch {
+  el: Element;
+  text: string;
+  alreadyTranslated: boolean;
+}
+
+/**
+ * Resolve the single translatable paragraph block under the hovered DOM element (or cursor coordinates).
+ * If the hovered element is already translated (`[data-pp-done]` or inside `.pp-trans`), returns `{ el, text: "", alreadyTranslated: true }`
+ * so pressing the hover shortcut key again toggles/restores that paragraph.
+ */
+export function findHoverParagraph(
+  target: Element | null,
+  opts: { skipSelectors?: string; clientX?: number; clientY?: number } = {},
+): HoverParagraphMatch | null {
+  if (!target || target.nodeType !== 1) return null;
+  const doc = target.ownerDocument;
+  if (!doc) return null;
+
+  // Hovering directly over an inserted `.pp-trans` span targets its parent paragraph for toggle/restore
+  const transSpan = target.closest(".pp-trans");
+  if (transSpan?.parentElement) {
+    return { el: transSpan.parentElement, text: "", alreadyTranslated: true };
+  }
+
+  // Ignore extension's own floating UI controls (FAB, selection card, video subtitle menu/overlay)
+  if (target.closest("[data-pp-ui]") || target.tagName === "SIDEKICK-UI") return null;
+
+  const doneEl = target.closest("[data-pp-done]");
+  if (doneEl) {
+    return { el: doneEl, text: "", alreadyTranslated: true };
+  }
+
+  let block: Element | null = target;
+  while (block && block !== doc.body && block !== doc.documentElement && INLINE.has(block.tagName)) {
+    block = block.parentElement;
+  }
+  if (!block || block === doc.body || block === doc.documentElement) return null;
+
+  const paras = collectParagraphs(block, { skipSelectors: opts.skipSelectors });
+  if (paras.length === 1) {
+    return { el: paras[0].el, text: paras[0].text, alreadyTranslated: false };
+  }
+  if (paras.length > 1) {
+    const containing = paras.filter((p) => p.el.contains(target));
+    if (containing.length > 0) {
+      const deepest = containing[containing.length - 1];
+      return { el: deepest.el, text: deepest.text, alreadyTranslated: false };
+    }
+    if (opts.clientX != null && opts.clientY != null) {
+      const { clientX, clientY } = opts;
+      let best: Paragraph | null = null;
+      let bestDist = 28;
+      for (const p of paras) {
+        const r = (p.el as HTMLElement).getBoundingClientRect?.();
+        if (!r || (r.width === 0 && r.height === 0)) continue;
+        const dx = clientX < r.left ? r.left - clientX : clientX > r.right ? clientX - r.right : 0;
+        const dy = clientY < r.top ? r.top - clientY : clientY > r.bottom ? clientY - r.bottom : 0;
+        const dist = Math.hypot(dx, dy);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = p;
+        }
+      }
+      if (best) return { el: best.el, text: best.text, alreadyTranslated: false };
+    }
+  }
+  return null;
+}
+
+/** Remove the inserted translation from a single paragraph element and restore its original state. */
+export function restoreParagraph(el: Element): void {
+  el.querySelectorAll(":scope > .pp-trans").forEach((n) => n.remove());
+  el.removeAttribute("data-pp-done");
+  el.removeAttribute("data-pp-pending");
+  (el as HTMLElement).style?.removeProperty("--pp-fs");
+  if ((el as HTMLElement).getAttribute?.("style") === "") el.removeAttribute("style");
+  let anc = el.parentElement;
+  for (let depth = 0; anc && depth < 3; depth++, anc = anc.parentElement) {
+    if (!anc.querySelector("[data-pp-done]")) {
+      anc.removeAttribute("data-pp-unclip");
+    }
+  }
+}
+
+export interface HoverTranslateControllerDeps {
+  doc?: Document;
+  getKey: () => "Shift" | "Alt" | "Control" | "off";
+  getTargetLang: () => string;
+  getStyle: () => string;
+  getSkipSelectors?: () => string;
+  isDisabled?: () => boolean;
+  translateOne: (text: string) => Promise<string>;
+}
+
+function isEditableElement(el: Element | null): boolean {
+  if (!el || el.nodeType !== 1) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if ((el as HTMLElement).isContentEditable) return true;
+  const ce = el.getAttribute("contenteditable");
+  return ce === "" || ce === "true";
+}
+
+/**
+ * Attach mouse-hover tracking and solo modifier-key listener (default `Shift`) so tapping the shortcut key
+ * while hovering over any paragraph translates (or restores) that individual paragraph in place.
+ */
+export function setupHoverTranslate(deps: HoverTranslateControllerDeps): { trigger: () => Promise<boolean>; destroy: () => void } {
+  const doc = deps.doc ?? document;
+  let lastTarget: Element | null = null;
+  let lastCoords: { x: number; y: number } | null = null;
+  let pendingKeyDownAt = 0;
+  let comboCancelled = false;
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (e.target && (e.target as Node).nodeType === 1) {
+      lastTarget = e.target as Element;
+    }
+    lastCoords = { x: e.clientX, y: e.clientY };
+  };
+
+  const onMouseOver = (e: MouseEvent) => {
+    if (e.target && (e.target as Node).nodeType === 1) {
+      lastTarget = e.target as Element;
+    }
+  };
+
+  const onMouseDown = () => {
+    if (pendingKeyDownAt > 0) {
+      comboCancelled = true;
+      pendingKeyDownAt = 0;
+    }
+  };
+
+  const trigger = async (): Promise<boolean> => {
+    if (deps.isDisabled?.()) return false;
+    const fromPoint =
+      lastCoords && typeof doc.elementFromPoint === "function"
+        ? doc.elementFromPoint(lastCoords.x, lastCoords.y)
+        : null;
+    const target = lastTarget?.isConnected ? lastTarget : fromPoint;
+    const match = findHoverParagraph(target, {
+      skipSelectors: deps.getSkipSelectors?.(),
+      clientX: lastCoords?.x,
+      clientY: lastCoords?.y,
+    });
+    if (!match) return false;
+
+    if (match.alreadyTranslated) {
+      restoreParagraph(match.el);
+      return true;
+    }
+    if (match.el.hasAttribute("data-pp-pending")) return false;
+
+    const el = match.el as HTMLElement;
+    el.querySelectorAll(":scope > .pp-failed").forEach((n) => n.remove());
+    markPending(el, true);
+    try {
+      const trans = (await deps.translateOne(match.text))?.trim();
+      markPending(el, false);
+      if (trans && el.isConnected) {
+        const view = doc.defaultView ?? window;
+        el.style.setProperty("--pp-fs", view.getComputedStyle(el).fontSize);
+        insertTranslation(el, trans, { lang: deps.getTargetLang(), style: deps.getStyle() });
+        return true;
+      }
+    } catch {
+      markPending(el, false);
+    }
+    return false;
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    const wanted = deps.getKey();
+    if (wanted === "off" || deps.isDisabled?.()) return;
+    if (isEditableElement(doc.activeElement) || isEditableElement(e.target as Element | null)) {
+      pendingKeyDownAt = 0;
+      return;
+    }
+    if (e.key === wanted) {
+      if (e.repeat) return;
+      const otherMod =
+        (wanted !== "Shift" && e.shiftKey) ||
+        (wanted !== "Alt" && e.altKey) ||
+        (wanted !== "Control" && e.ctrlKey) ||
+        e.metaKey;
+      if (otherMod) {
+        comboCancelled = true;
+        pendingKeyDownAt = 0;
+        return;
+      }
+      pendingKeyDownAt = Date.now();
+      comboCancelled = false;
+    } else if (pendingKeyDownAt > 0) {
+      comboCancelled = true;
+      pendingKeyDownAt = 0;
+    }
+  };
+
+  const onKeyUp = (e: KeyboardEvent) => {
+    const wanted = deps.getKey();
+    if (wanted === "off" || deps.isDisabled?.()) return;
+    if (e.key === wanted && !comboCancelled && pendingKeyDownAt > 0) {
+      const elapsed = Date.now() - pendingKeyDownAt;
+      pendingKeyDownAt = 0;
+      if (elapsed <= 1000) {
+        void trigger();
+      }
+    }
+  };
+
+  doc.addEventListener("mousemove", onMouseMove, { passive: true });
+  doc.addEventListener("mouseover", onMouseOver, { passive: true });
+  doc.addEventListener("mousedown", onMouseDown, { passive: true });
+  doc.addEventListener("keydown", onKeyDown, true);
+  doc.addEventListener("keyup", onKeyUp, true);
+
+  return {
+    trigger,
+    destroy: () => {
+      doc.removeEventListener("mousemove", onMouseMove);
+      doc.removeEventListener("mouseover", onMouseOver);
+      doc.removeEventListener("mousedown", onMouseDown);
+      doc.removeEventListener("keydown", onKeyDown, true);
+      doc.removeEventListener("keyup", onKeyUp, true);
+    },
+  };
+}
+
 /**
  * "dark" when the original text is light-coloured (i.e. it sits on a dark background), so the translation can pick a
  * brighter accent there. Uses the element's own text colour rather than guessing the page background.
@@ -126,6 +356,19 @@ export function insertTranslation(el: Element, translation: string, opts: { lang
   }
   el.appendChild(wrap);
   el.setAttribute("data-pp-done", "");
+
+  // Unclip tight wrapper ancestors (e.g. YouTube `div#title > h1 > yt-formatted-string` or card title containers)
+  // that set `max-height`, `-webkit-line-clamp`, or `overflow: hidden` for single-language text.
+  const elLen = (el.textContent ?? "").trim().length;
+  let anc = el.parentElement;
+  for (let depth = 0; anc && depth < 3 && anc !== doc.body && anc !== doc.documentElement; depth++, anc = anc.parentElement) {
+    const ancLen = (anc.textContent ?? "").trim().length;
+    if (anc.children.length <= 2 && ancLen <= elLen + 40) {
+      anc.setAttribute("data-pp-unclip", "");
+    } else {
+      break;
+    }
+  }
   return wrap;
 }
 
@@ -144,11 +387,14 @@ export function restoreOriginal(root: ParentNode): number {
     (n as HTMLElement).style?.removeProperty("--pp-fs");
     if ((n as HTMLElement).getAttribute?.("style") === "") n.removeAttribute("style");
   });
+  root.querySelectorAll("[data-pp-unclip]").forEach((n) => n.removeAttribute("data-pp-unclip"));
   return nodes.length;
 }
 
 export const TRANSLATION_CSS = `
-.pp-trans{display:block;margin:.35em 0 .1em;line-height:1.6;font-size:inherit;}
+[data-pp-done],[data-pp-unclip]{max-height:none!important;-webkit-line-clamp:unset!important;line-clamp:unset!important;overflow:visible!important}
+:is(h1,h2,h3,h4,h5,h6,p,li,dt,dd,blockquote,yt-formatted-string)[data-pp-done],:is(h1,h2,h3,h4,h5,h6,p,a,yt-formatted-string)[data-pp-unclip]{height:auto!important}
+.pp-trans{display:block;margin:.3em 0 .15em;padding-bottom:2px;line-height:1.58;font-size:inherit;overflow:visible;}
 li>.pp-trans,td>.pp-trans,th>.pp-trans,dt>.pp-trans,dd>.pp-trans{margin-top:.2em}
 h1>.pp-trans,h2>.pp-trans,h3>.pp-trans,h4>.pp-trans,h5>.pp-trans,h6>.pp-trans{font-weight:inherit;}
 .pp-style-green{color:#16a34a;margin-top:.25em}
@@ -157,7 +403,7 @@ html.pp-only .pp-style-green{color:inherit}
 .pp-style-plain .pp-trans-inner{}
 .pp-style-dashed .pp-trans-inner{border-bottom:1.5px dashed rgba(99,102,241,.75);padding-bottom:1px}
 .pp-style-faded .pp-trans-inner{opacity:.72}
-.pp-style-highlight .pp-trans-inner{background:linear-gradient(transparent 55%,rgba(253,224,71,.55) 55%);}
+.pp-style-highlight .pp-trans-inner{background:linear-gradient(transparent 55%,rgba(253,224,71,.55) 55%);padding-bottom:1px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .pp-style-card{background:rgba(99,102,241,.07);border-left:3px solid rgba(99,102,241,.6);border-radius:6px;padding:.35em .6em}
 [data-pp-pending]::after{content:"";display:inline-block;width:.8em;height:.8em;margin-left:.4em;vertical-align:-.1em;border-radius:50%;
  border:2px solid rgba(99,102,241,.25);border-top-color:rgba(99,102,241,.9);animation:pp-spin .8s linear infinite}

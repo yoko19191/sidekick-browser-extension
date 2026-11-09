@@ -1,8 +1,8 @@
 import { TranslationCache } from "@/src/lib/cache";
-import { buildTranslatePrompt, parseTranslationResponse } from "@/src/lib/batch";
+import { buildSubtitleTranslatePrompt, buildTranslatePrompt, parseTranslationResponse } from "@/src/lib/batch";
 import { promptVariant, translationCacheKey } from "@/src/lib/hash";
 import { listModels, streamText, testConnection } from "@/src/lib/llm";
-import { cleanGeneratedTitle, deriveChatTitle, LONG_PAGE_CHARS, mapConcurrent, pageSystemPrompt, planChatExcerpts, planLongSummary, sectionPrompt, SUMMARY_CONCURRENCY, summaryInstruction } from "@/src/lib/prompts";
+import { cleanGeneratedTitle, deriveChatTitle, LONG_PAGE_CHARS, mapConcurrent, pageSystemPrompt, planChatExcerpts, planLongSummary, sectionPrompt, SUMMARY_CONCURRENCY, summaryInstruction, videoSummaryInstruction } from "@/src/lib/prompts";
 import { friendlyError, keyOptional, loadProviders, redactSecrets, resolveModelRef, type OAuthProviderId } from "@/src/lib/providers";
 import { ensureFreshKey, exchangeOAuthCode, pollOAuthSession, startOAuthFlow, tryCaptureOAuthTabUrl } from "@/src/lib/oauth";
 import { langName, loadSettings } from "@/src/lib/settings";
@@ -104,30 +104,54 @@ export default defineBackground({
       for (const t of tabs) if (t.id) chrome.tabs.sendMessage(t.id, { type: "pp:config", settings: s.translation }).catch(() => {});
     });
 
-    // Auto-inject only where the user granted host access: floating button, selection translation, per-site auto-translate.
+    async function maybeAutoInjectTab(tabId: number, url?: string, allowAutoTranslate = true) {
+      if (!url || !/^https?:/.test(url)) return;
+      try {
+        const origin = new URL(url).origin;
+        const host = new URL(url).host;
+        if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) return;
+        const s = await loadSettings();
+        const t = s.translation;
+        if (t.neverSites.includes(host)) return;
+        await ensureContentScript(tabId);
+        if (allowAutoTranslate && t.autoSites.includes(host)) {
+          await toggleTranslate(tabId, true);
+        }
+      } catch {
+        /* restricted page */
+      }
+    }
+
+    // Auto-inject into already-open permitted tabs on extension startup / reload so video player controls appear without refreshing.
+    chrome.tabs.query({}).then((tabs) => {
+      for (const t of tabs) {
+        if (t.id && t.url) void maybeAutoInjectTab(t.id, t.url, false);
+      }
+    }).catch(() => {});
+
+    chrome.permissions.onAdded?.addListener(() => {
+      chrome.tabs.query({}).then((tabs) => {
+        for (const t of tabs) {
+          if (t.id && t.url) void maybeAutoInjectTab(t.id, t.url, false);
+        }
+      }).catch(() => {});
+    });
+
+    // Auto-inject only where the user granted host access: floating button, selection translation, video subtitle switch, per-site auto-translate.
     chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
       if (tab.url && tab.url.includes("code=")) {
         void tryCaptureOAuthTabUrl(tab.url);
       }
-      if (info.status !== "complete" || !tab.url || !/^https?:/.test(tab.url)) return;
-      const origin = new URL(tab.url).origin;
-      const host = new URL(tab.url).host;
-      if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) return;
-      const s = await loadSettings();
-      const t = s.translation;
-      if (t.neverSites.includes(host)) return;
-      const auto = t.autoSites.includes(host);
-      if (!auto && !t.floatingButton && !t.selectionTranslate) return;
-      try {
-        await ensureContentScript(tabId);
-        if (auto) await toggleTranslate(tabId, true);
-      } catch {
-        /* restricted page */
-      }
+      if ((info.status !== "complete" && !info.url) || !tab.url || !/^https?:/.test(tab.url)) return;
+      await maybeAutoInjectTab(tabId, tab.url, info.status === "complete");
     });
 
     // ---- translation ----
-    async function translateBatch(texts: string[], tabId?: number): Promise<string[]> {
+    async function translateBatch(
+      texts: string[],
+      tabId?: number,
+      opts?: { mode?: "page" | "subtitle"; contextBefore?: string[] },
+    ): Promise<string[]> {
       const ac = new AbortController();
       if (tabId != null) {
         let set = translateInflight.get(tabId);
@@ -137,11 +161,12 @@ export default defineBackground({
       try {
         const s = await loadSettings();
         const t = s.translation;
+        const isSubtitle = opts?.mode === "subtitle";
         const { provider, modelId, apiKey } = await resolveTask(s.models.translate);
         cache.maxEntries = s.cache.maxEntries;
         const modelTag = `${provider.presetId}:${modelId}`;
-        // Cache variant = hash of the FULL extra prompt (two prompts sharing a 64-char prefix must not share entries).
-        const variant = await promptVariant(t.extraPrompt);
+        // Cache variant = hash of the FULL extra prompt (plus subtitle mode tag so subtitle translations use subtitle-specific cache).
+        const variant = await promptVariant(isSubtitle ? `subtitle:v2:${t.extraPrompt}` : t.extraPrompt);
         const keys = await Promise.all(texts.map((x) => translationCacheKey(x, t.targetLang, modelTag, variant)));
         const cached = t.cacheEnabled ? await cache.getMany(keys) : texts.map(() => undefined);
         const missIdx = cached.map((c, i) => (c === undefined ? i : -1)).filter((i) => i >= 0);
@@ -149,8 +174,23 @@ export default defineBackground({
         const run = async (idx: number[]): Promise<void> => {
           if (!idx.length) return;
           if (ac.signal.aborted) throw new DOMException("aborted", "AbortError");
-          const prompt = buildTranslatePrompt(idx.map((i) => texts[i]), langName(t.targetLang), t.extraPrompt);
-          const r = await streamText({ provider, modelId, apiKey, signal: ac.signal, system: prompt.system, messages: [{ role: "user", content: prompt.user }], temperature: 0.2, maxTokens: 2048 });
+          const batchTexts = idx.map((i) => texts[i]);
+          const firstMiss = idx[0];
+          const priorInBatch = firstMiss > 0 ? texts.slice(Math.max(0, firstMiss - 2), firstMiss) : [];
+          const ctx = [...(opts?.contextBefore ?? []), ...priorInBatch].slice(-2);
+          const prompt = isSubtitle
+            ? buildSubtitleTranslatePrompt(batchTexts, langName(t.targetLang), t.extraPrompt, ctx)
+            : buildTranslatePrompt(batchTexts, langName(t.targetLang), t.extraPrompt);
+          const r = await streamText({
+            provider,
+            modelId,
+            apiKey,
+            signal: ac.signal,
+            system: prompt.system,
+            messages: [{ role: "user", content: prompt.user }],
+            temperature: isSubtitle ? 0.3 : 0.2,
+            maxTokens: 2048,
+          });
           const parsed = parseTranslationResponse(r.text, idx.length);
           if (!parsed) {
             if (idx.length === 1) throw new Error(tr("err.unparsable"));
@@ -218,8 +258,21 @@ export default defineBackground({
       const tabId = sender.tab?.id;
       // ---- from our content script (only text in / text out; never keys or provider config) ----
       switch (msg?.type) {
+        case "pp:get-config":
+          return reply(loadSettings().then((s) => s.translation));
         case "translate:batch":
-          return reply(translateBatch((msg.texts as string[]).map(String), tabId));
+          return reply(
+            translateBatch(
+              (msg.texts as string[]).map(String),
+              tabId,
+              msg.mode === "subtitle"
+                ? {
+                    mode: "subtitle",
+                    contextBefore: Array.isArray(msg.contextBefore) ? msg.contextBefore.map(String) : undefined,
+                  }
+                : undefined,
+            ),
+          );
         case "translate:abort":
           if (tabId != null) abortTabTranslations(tabId);
           return reply(Promise.resolve({ ok: true }));
@@ -257,6 +310,14 @@ export default defineBackground({
       switch (msg?.type) {
         case "translate:toggle":
           return reply(toggleTranslate(msg.tabId, msg.force));
+        case "subtitles:toggle":
+          return reply(
+            (async () => {
+              await ensureContentScript(msg.tabId);
+              const s = await loadSettings();
+              return chrome.tabs.sendMessage(msg.tabId, { type: "subtitles:toggle", force: msg.force, settings: s.translation });
+            })(),
+          );
         case "translate:status":
           return reply(chrome.tabs.sendMessage(msg.tabId, { type: "translate:status" }).catch(() => ({ active: false, total: 0, done: 0, errors: 0 })));
         case "page:extract":
@@ -387,9 +448,14 @@ export default defineBackground({
           if (req.task === "summary" && messages.length) {
             const lastText = messages[messages.length - 1].content.trim();
             const isDefaultSummaryCmd = !lastText || lastText === tr("chat.summarizePage") || lastText === "Summarize page";
+            const isVideoSummaryCmd = lastText === tr("chat.summarizeVideo") || lastText === "Summarize video";
             messages[messages.length - 1] = {
               role: "user",
-              content: isDefaultSummaryCmd ? summaryInstruction(s) : `${lastText} Be faithful to the page; don't invent facts.`,
+              content: isDefaultSummaryCmd
+                ? summaryInstruction(s)
+                : isVideoSummaryCmd
+                  ? videoSummaryInstruction(s)
+                  : `${lastText} Be faithful to the page; don't invent facts.`,
             };
           }
 

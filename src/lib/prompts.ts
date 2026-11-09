@@ -58,6 +58,16 @@ export function summaryInstruction(s: Settings) {
   return `${t} Be faithful to the page; don't invent facts.`;
 }
 
+export function videoSummaryInstruction(s: Settings) {
+  const base =
+    s.summary.length === "short"
+      ? "Summarize this video in 3-5 concise bullet points based on its video transcript / subtitles."
+      : s.summary.length === "detailed"
+        ? "Summarize this video thoroughly based on its video transcript / subtitles: provide a one-sentence TL;DR, a structured breakdown of each section/topic with [MM:SS] timestamps and key arguments/examples, and final takeaways."
+        : "Summarize this video based on its video transcript / subtitles: provide a one-sentence TL;DR, 4-7 key points with [MM:SS] timestamps where applicable, and main takeaways.";
+  return `${base} Prioritize the video transcript over page comments or sidebar recommendations, and never invent facts.`;
+}
+
 /** Split long Markdown into ~chunkChars pieces on heading / paragraph boundaries. */
 export function chunkMarkdown(md: string, chunkChars = 12000): string[] {
   if (md.length <= chunkChars) return [md];
@@ -223,9 +233,11 @@ export function deriveChatTitle(
   const firstAsst = messages.find((m) => m.role === "assistant" && m.content.trim());
   const readablePageTitle = displayPageTitle(pageTitle, undefined, "");
   const summarizeCmd = tr("chat.summarizePage");
+  const summarizeVideoCmd = tr("chat.summarizeVideo");
   const isGenericSummary =
     firstUser?.kind === "summary" ||
     firstUser?.content.trim() === summarizeCmd ||
+    firstUser?.content.trim() === summarizeVideoCmd ||
     firstUser?.content.trim() === DEFAULT_KEYPOINTS_TEMPLATE;
 
   if (isGenericSummary) {

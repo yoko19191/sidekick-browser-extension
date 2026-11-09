@@ -33,6 +33,7 @@ export function defaultSettings(uiLang?: string): Settings {
       neverSites: [],
       floatingButton: true,
       selectionTranslate: true,
+      hoverTranslateKey: "Shift",
     },
     summary: { length: "medium", language: "target", maxContextChars: 48000 },
     chat: { temperature: 0.3, maxTokens: 4096 },

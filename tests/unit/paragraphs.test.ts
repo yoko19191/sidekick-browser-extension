@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { collectParagraphs, insertTranslation, restoreOriginal } from "@/src/lib/paragraphs";
+import { describe, expect, it, vi } from "vitest";
+import { collectParagraphs, insertTranslation, restoreOriginal, setupHoverTranslate } from "@/src/lib/paragraphs";
 
 function dom(html: string) {
   document.body.innerHTML = html;
@@ -63,5 +63,83 @@ describe("translation tone", () => {
     document.body.innerHTML = `<p id="a" style="color:#111">Hello</p><p id="b" style="color:rgb(240,240,240)">Hi</p>`;
     expect(insertTranslation(document.getElementById("a")!, "你好", { lang: "zh-CN", style: "green" }).getAttribute("data-pp-tone")).toBe("light");
     expect(insertTranslation(document.getElementById("b")!, "嗨", { lang: "zh-CN", style: "green" }).getAttribute("data-pp-tone")).toBe("dark");
+  });
+});
+
+describe("setupHoverTranslate (Shift hover single-paragraph translation)", () => {
+  it("translates only the hovered paragraph when Shift is tapped, and restores it on a second Shift tap", async () => {
+    dom(`
+      <article>
+        <p id="p1">First paragraph with <a id="link1" href="#">inline link</a> inside.</p>
+        <p id="p2">Second untouched paragraph.</p>
+        <input id="inp" type="text" />
+      </article>
+    `);
+    const translateOne = vi.fn(async (text: string) => `译:${text}`);
+    const ctrl = setupHoverTranslate({
+      doc: document,
+      getKey: () => "Shift",
+      getTargetLang: () => "zh-CN",
+      getStyle: () => "green",
+      translateOne,
+    });
+
+    const link1 = document.getElementById("link1")!;
+    const p1 = document.getElementById("p1")!;
+    const p2 = document.getElementById("p2")!;
+
+    // Hover over the inline link inside #p1
+    link1.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+    // Tap Shift+A (combo key) -> should NOT trigger translation
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "A", shiftKey: true, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    expect(translateOne).not.toHaveBeenCalled();
+
+    // Tap solo Shift while hovering over #p1 -> translates #p1 only
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+
+    await vi.waitFor(() => expect(translateOne).toHaveBeenCalledOnce());
+    expect(translateOne).toHaveBeenCalledWith("First paragraph with inline link inside.");
+    expect(p1.querySelector(".pp-trans-inner")?.textContent).toBe("译:First paragraph with inline link inside.");
+    expect(p2.querySelector(".pp-trans")).toBeNull();
+
+    // Tap solo Shift again while hovering over #p1 -> restores #p1 back to original
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    expect(p1.querySelector(".pp-trans")).toBeNull();
+    expect(p1.hasAttribute("data-pp-done")).toBe(false);
+
+    ctrl.destroy();
+  });
+
+  it("marks tight wrapper ancestors (e.g. div#title > h1 > yt-formatted-string) with data-pp-unclip and cleans up on restore", () => {
+    dom(`
+      <div id="above-the-fold">
+        <div id="title">
+          <h1 id="heading">
+            <yt-formatted-string id="yt-str">시속 500km 첫 돌파...中 전기차 1대당 43억 원</yt-formatted-string>
+          </h1>
+        </div>
+        <div id="other-section">Channel Info and Subscribe Buttons that should not be marked</div>
+      </div>
+    `);
+    const ytStr = document.getElementById("yt-str")!;
+    const heading = document.getElementById("heading")!;
+    const titleWrap = document.getElementById("title")!;
+    const aboveFold = document.getElementById("above-the-fold")!;
+
+    insertTranslation(ytStr, "时速500公里首次突破……中国电动汽车每辆43亿韩元", { lang: "zh-CN", style: "highlight" });
+    expect(ytStr.hasAttribute("data-pp-done")).toBe(true);
+    expect(heading.hasAttribute("data-pp-unclip")).toBe(true);
+    expect(titleWrap.hasAttribute("data-pp-unclip")).toBe(true);
+    expect(aboveFold.hasAttribute("data-pp-unclip")).toBe(false);
+
+    restoreOriginal(document);
+    expect(ytStr.hasAttribute("data-pp-done")).toBe(false);
+    expect(heading.hasAttribute("data-pp-unclip")).toBe(false);
+    expect(titleWrap.hasAttribute("data-pp-unclip")).toBe(false);
   });
 });

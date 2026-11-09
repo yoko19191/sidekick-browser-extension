@@ -2,7 +2,7 @@
   "name": "sidekick-extension",
   "description": "翻翻 Sidekick – AI side panel for bilingual web translation and page summaries (BYOK)",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -12,6 +12,7 @@
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
+    "crx": "npm run zip && node scripts/pack-crx.mjs",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "vitest run",

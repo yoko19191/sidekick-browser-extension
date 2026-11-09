@@ -304,6 +304,25 @@ export function TranslationSection({ settings, update }: Ctx) {
         <Row title={tr("opt.displayMode")} chevron={false} right={<Segmented<DisplayMode> className="shrink-0" value={t.displayMode} onChange={(v) => set({ displayMode: v })} options={[{ value: "bilingual", label: tr("mode.bilingual") }, { value: "translation-only", label: tr("mode.only") }]} />} />
         <Row title={tr("opt.fab")} subtitle={tr("opt.fabHint")} chevron={false} right={<Switch testId="fab-switch" checked={t.floatingButton} onChange={(v) => set({ floatingButton: v })} />} />
         <Row title={tr("opt.selection")} subtitle={tr("opt.selectionHint")} chevron={false} right={<Switch checked={t.selectionTranslate} onChange={(v) => set({ selectionTranslate: v })} />} />
+        <Row
+          title={tr("sb.hoverTranslateKey")}
+          subtitle={tr("sb.hoverTranslateKeyHint")}
+          chevron={false}
+          right={
+            <Select
+              className="w-32 shrink-0"
+              testId="hover-translate-key"
+              value={t.hoverTranslateKey ?? "Shift"}
+              onChange={(v) => set({ hoverTranslateKey: v as Settings["translation"]["hoverTranslateKey"] })}
+              options={[
+                { value: "Shift", label: "Shift" },
+                { value: "Alt", label: "Alt / Option" },
+                { value: "Control", label: "Ctrl" },
+                { value: "off", label: tr("sb.hoverKeyOff") },
+              ]}
+            />
+          }
+        />
       </Group>
       <SectionLabel>{tr("opt.styleTitle")}</SectionLabel>
       <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-2" data-testid="style-grid">

@@ -20,6 +20,7 @@ export type SummaryLength = "short" | "medium" | "detailed";
 export type ThemeMode = "system" | "light" | "dark";
 export type UiLocale = "auto" | "zh" | "en";
 export type DisplayMode = "bilingual" | "translation-only";
+export type HoverTranslateKey = "Shift" | "Alt" | "Control" | "off";
 
 export interface Settings {
   theme: ThemeMode;
@@ -42,6 +43,7 @@ export interface Settings {
     neverSites: string[];
     floatingButton: boolean;
     selectionTranslate: boolean;
+    hoverTranslateKey: HoverTranslateKey;
   };
   summary: {
     length: SummaryLength;
@@ -125,4 +127,6 @@ export interface TranslateState {
   done: number;
   errors: number;
   lastError?: string;
+  subtitlesActive?: boolean;
+  videoSubtitlesAvailable?: boolean;
 }

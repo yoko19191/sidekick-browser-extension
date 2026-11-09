@@ -24,7 +24,7 @@ import { tr } from "@/src/i18n";
 import { STYLE_LABELS } from "@/src/lib/batch";
 import { keyOptional, resolveModelRef } from "@/src/lib/providers";
 import { LANGUAGES } from "@/src/lib/settings";
-import type { DisplayMode, ProviderConfig, Settings, ThemeMode, UiLocale } from "@/src/lib/types";
+import type { DisplayMode, HoverTranslateKey, ProviderConfig, Settings, ThemeMode, UiLocale } from "@/src/lib/types";
 import { cn, Segmented, Select, Switch } from "./components/ui";
 import type { TabInfo, useProviders } from "./hooks";
 import { bg } from "./messaging";
@@ -368,6 +368,25 @@ export function SidebarSettings({
                   >
                     {shortcut || tr("opt.notSet")}
                   </button>
+                }
+              />
+              <KimiRow
+                icon={Keyboard}
+                title={tr("sb.hoverTranslateKey")}
+                subtitle={tr("sb.hoverTranslateKeyHint")}
+                right={
+                  <Select
+                    testId="qs-hover-key"
+                    className="w-28 shrink-0"
+                    value={t.hoverTranslateKey ?? "Shift"}
+                    onChange={(v) => setT({ hoverTranslateKey: v as HoverTranslateKey })}
+                    options={[
+                      { value: "Shift", label: "Shift" },
+                      { value: "Alt", label: "Alt / Option" },
+                      { value: "Control", label: "Ctrl" },
+                      { value: "off", label: tr("sb.hoverKeyOff") },
+                    ]}
+                  />
                 }
               />
               <KimiRow

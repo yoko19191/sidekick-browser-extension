@@ -2,8 +2,8 @@ import { makeBatches, shouldTranslate } from "@/src/lib/batch";
 import { extractPage } from "@/src/lib/extract";
 import { normalizeText } from "@/src/lib/hash";
 import { PageUi } from "@/src/lib/page-ui";
-import { collectParagraphs, insertTranslation, markPending, restoreOriginal, TRANSLATION_CSS } from "@/src/lib/paragraphs";
-import { extractVideoTranscriptMarkdown, VIDEO_SUBTITLE_CSS, VideoSubtitleController } from "@/src/lib/video-subtitles";
+import { collectParagraphs, insertTranslation, markPending, restoreOriginal, setupHoverTranslate, TRANSLATION_CSS } from "@/src/lib/paragraphs";
+import { extractVideoTranscriptMarkdown, hasVideoSubtitlesAvailable, loadVideoSubtitleDomainEnabled, VIDEO_SUBTITLE_CSS, VideoSubtitleController } from "@/src/lib/video-subtitles";
 import type { Settings, TranslateState } from "@/src/lib/types";
 import { tr } from "@/src/i18n";
 import { handleAgentMessage } from "@/src/agent/page/content-host";
@@ -64,18 +64,25 @@ export default defineContentScript({
       ui.selectionEnabled = s.selectionTranslate && !never;
       ui.setFab(s.floatingButton && !never, active);
       document.documentElement.classList.toggle("pp-only", s.displayMode === "translation-only");
+      subtitleCtrl.setControlBarEnabled(!never, s);
       subtitleCtrl.updateConfig(s);
     };
 
     const report = () => {
-      state = { ...state, active };
+      state = {
+        ...state,
+        active,
+        subtitlesActive: subtitleCtrl.isActive(),
+        videoSubtitlesAvailable: hasVideoSubtitlesAvailable(document),
+      };
       ui.setFab(!!cfg?.floatingButton && !cfg.neverSites.includes(host), active);
       chrome.runtime.sendMessage({ type: "translate:state", state }).catch(() => {});
     };
 
     const subtitleCtrl = new VideoSubtitleController({
       doc: document,
-      translateBatch: (texts) => send<string[]>({ type: "translate:batch", texts }),
+      translateBatch: (texts, contextBefore) =>
+        send<string[]>({ type: "translate:batch", texts, mode: "subtitle", contextBefore }),
       onStatsChange: ({ total = 0, done = 0, errors = 0 }) => {
         if (!active) return;
         state.total += total;
@@ -94,6 +101,25 @@ export default defineContentScript({
       (document.head ?? document.documentElement).appendChild(st);
     };
     ensureStyle();
+    subtitleCtrl.setControlBarEnabled(true);
+    setupHoverTranslate({
+      doc: document,
+      getKey: () => cfg?.hoverTranslateKey ?? "Shift",
+      getTargetLang: () => cfg?.targetLang ?? "zh-CN",
+      getStyle: () => cfg?.style ?? "green",
+      getSkipSelectors: () => cfg?.skipSelectors ?? "",
+      isDisabled: () => Boolean(cfg?.neverSites.includes(host)),
+      translateOne: async (text) => {
+        ensureStyle();
+        const res = await send<string[]>({ type: "translate:batch", texts: [text] });
+        return res?.[0] ?? "";
+      },
+    });
+    send<TSettings>({ type: "pp:get-config" })
+      .then((s) => {
+        if (s && !cfg) applyConfig(s);
+      })
+      .catch(() => {});
 
     const isVisible = (el: Element) => {
       const r = (el as HTMLElement).getBoundingClientRect?.();
@@ -233,7 +259,9 @@ export default defineContentScript({
 
     function stop() {
       active = false;
-      subtitleCtrl.stop();
+      if (!loadVideoSubtitleDomainEnabled(document)) {
+        subtitleCtrl.stop();
+      }
       io?.disconnect();
       mo?.disconnect();
       io = mo = null;
@@ -297,8 +325,19 @@ export default defineContentScript({
           sendResponse({ ...state, active });
           return;
         }
+        case "subtitles:toggle": {
+          if (msg.settings) applyConfig(msg.settings);
+          const subActive = subtitleCtrl.toggle(msg.force);
+          sendResponse({ active: subActive });
+          return;
+        }
         case "translate:status":
-          sendResponse({ ...state, active });
+          sendResponse({
+            ...state,
+            active,
+            subtitlesActive: subtitleCtrl.isActive(),
+            videoSubtitlesAvailable: hasVideoSubtitlesAvailable(document),
+          });
           return;
         case "page:extract":
           (async () => {
@@ -310,13 +349,14 @@ export default defineContentScript({
             }
             const videoTranscript = await extractVideoTranscriptMarkdown(document).catch(() => null);
             if (videoTranscript) {
-              const combined = extracted.markdown
-                ? `${videoTranscript}\n\n---\n\n${extracted.markdown}`
+              const pageTail = extracted.markdown ? extracted.markdown.slice(0, 4000) : "";
+              const combined = pageTail
+                ? `${videoTranscript}\n\n---\n\n${pageTail}`
                 : videoTranscript;
               extracted = {
                 ...extracted,
                 markdown: combined,
-                length: Math.max(extracted.length, combined.length),
+                length: combined.length,
               };
             }
             sendResponse(extracted);

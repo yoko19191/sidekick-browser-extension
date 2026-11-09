@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTranslatePrompt, makeBatches, parseTranslationResponse, shouldTranslate } from "@/src/lib/batch";
+import { buildSubtitleTranslatePrompt, buildTranslatePrompt, makeBatches, parseTranslationResponse, shouldTranslate } from "@/src/lib/batch";
 
 const items = (lens: number[]) => lens.map((n, id) => ({ id, text: "x".repeat(n) }));
 
@@ -52,6 +52,22 @@ describe("shouldTranslate / prompt", () => {
     expect(p.system).toMatch(/untrusted/);
     expect(p.system).toMatch(/same length/);
     expect(JSON.parse(p.user)).toEqual(["a", "b"]);
+  });
+  it("builds a subtitle-specific prompt that allows word-order adjustment and includes preceding context", () => {
+    const p = buildSubtitleTranslatePrompt(
+      ["Find it over on the", "Too Long channel or wherever you get your podcasts."],
+      "Simplified Chinese",
+      "Use conversational tone",
+      ["argue with us on our podcast, The World Leader Leaderboard."],
+    );
+    expect(p.system).toMatch(/change word order/i);
+    expect(p.system).toMatch(/split across consecutive subtitle cues/i);
+    expect(p.system).toContain("argue with us on our podcast, The World Leader Leaderboard.");
+    expect(p.system).toContain("Use conversational tone");
+    expect(JSON.parse(p.user)).toEqual([
+      "Find it over on the",
+      "Too Long channel or wherever you get your podcasts.",
+    ]);
   });
 });
 

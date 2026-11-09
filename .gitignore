@@ -8,3 +8,5 @@ playwright-report
 .env*
 .output-e2e
 .output-e2e-nohost
+.crx-key.pem
+private-key.pem
