@@ -225,6 +225,45 @@ describe("VideoSubtitleController dual engines", () => {
     expect(doc.getElementById("pp-video-sub-btn")).toBeNull();
   });
 
+  it("positions #pp-video-sub-btn between playback-rate and volume icons in Bilibili control bar (.bpx-player-control-bottom-right)", async () => {
+    const doc = document.implementation.createHTMLDocument("Bilibili Player Bar");
+    doc.body.innerHTML = `
+      <div class="bpx-player-Primary-area">
+        <div class="bpx-player-video-area">
+          <video></video>
+          <div class="bpx-player-control-bottom">
+            <div class="bpx-player-control-bottom-right"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    const translateBatch = vi.fn(async (texts: string[]) => texts);
+    const ctrl = new VideoSubtitleController({ doc, translateBatch });
+    ctrl.setControlBarEnabled(true, defaultSettings("zh-CN").translation);
+
+    const rightBar = doc.querySelector(".bpx-player-control-bottom-right")!;
+    const btn = doc.getElementById("pp-video-sub-btn")!;
+    expect(btn).toBeTruthy();
+    expect(btn.classList.contains("bpx-player-ctrl-btn")).toBe(true);
+
+    // Simulate Bilibili asynchronously mounting quality, playbackrate, volume, and setting buttons
+    const quality = doc.createElement("div");
+    quality.className = "bpx-player-ctrl-btn bpx-player-ctrl-quality";
+    const rate = doc.createElement("div");
+    rate.className = "bpx-player-ctrl-btn bpx-player-ctrl-playbackrate";
+    const volume = doc.createElement("div");
+    volume.className = "bpx-player-ctrl-btn bpx-player-ctrl-volume";
+    const setting = doc.createElement("div");
+    setting.className = "bpx-player-ctrl-btn bpx-player-ctrl-setting";
+    rightBar.append(quality, rate, volume, setting);
+
+    ctrl.ensurePlayerButton();
+    expect(btn.previousElementSibling).toBe(rate);
+    expect(btn.nextElementSibling).toBe(volume);
+
+    ctrl.setControlBarEnabled(false);
+  });
+
   it("opens 2-level Subtitle Settings & Style popover and live-updates position, display mode, opacity, and font size", async () => {
     const doc = document.implementation.createHTMLDocument("Subtitle Style Menu");
     doc.body.innerHTML = `

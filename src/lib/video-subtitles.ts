@@ -1000,6 +1000,36 @@ html.pp-yt-sub-active .ytp-caption-window-container {
   background: #4ade80;
   box-shadow: 0 0 6px rgba(74, 222, 128, 0.65);
 }
+.bpx-player-control-bottom-right #pp-video-sub-btn,
+.squirtle-controller-wrap-right #pp-video-sub-btn {
+  height: 22px !important;
+  width: 36px !important;
+  min-width: 36px !important;
+  line-height: 22px !important;
+  align-self: flex-start !important;
+}
+.bpx-player-control-bottom-right #pp-video-sub-btn .pp-vsub-icon-wrap,
+.squirtle-controller-wrap-right #pp-video-sub-btn .pp-vsub-icon-wrap {
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+}
+.bpx-player-control-bottom-right #pp-video-sub-btn .pp-vsub-icon-svg,
+.squirtle-controller-wrap-right #pp-video-sub-btn .pp-vsub-icon-svg {
+  width: 20px !important;
+  height: 20px !important;
+  filter: none !important;
+}
+.bpx-player-control-bottom-right #pp-video-sub-btn[aria-pressed="true"]::after,
+.squirtle-controller-wrap-right #pp-video-sub-btn[aria-pressed="true"]::after {
+  bottom: -2px !important;
+}
+.bpx-player-video-area #pp-video-sub-menu,
+.bpx-player-Primary-area #pp-video-sub-menu,
+.squirtle-video-wrap #pp-video-sub-menu {
+  bottom: 64px;
+}
 #pp-video-sub-btn.pp-vsub-toggle-floating {
   position: absolute !important;
   right: 14px !important;
@@ -1458,9 +1488,7 @@ export class VideoSubtitleController {
       if (MO) {
         this.controlMo = new MO(() => {
           if (!this.controlBarEnabled) return;
-          if (!this.toggleBtnEl || !this.toggleBtnEl.isConnected) {
-            this.ensurePlayerButton();
-          }
+          this.ensurePlayerButton();
         });
         this.controlMo.observe(this.doc.body, { childList: true, subtree: true });
       }
@@ -1599,6 +1627,16 @@ export class VideoSubtitleController {
       }
     }
 
+    const isBiliBar =
+      !isFloating &&
+      (targetBar.classList.contains("bpx-player-control-bottom-right") ||
+        targetBar.classList.contains("squirtle-controller-wrap-right"));
+    const biliAnchor = isBiliBar
+      ? targetBar.querySelector<HTMLElement>(
+          ".bpx-player-ctrl-volume, .bpx-player-ctrl-setting, .squirtle-volume-wrap, .squirtle-setting-wrap",
+        )
+      : null;
+
     if (!this.toggleBtnEl || !this.toggleBtnEl.isConnected || this.toggleBtnEl.parentElement !== targetBar) {
       this.toggleBtnEl?.remove();
       const btn = this.doc.createElement("button");
@@ -1610,7 +1648,9 @@ export class VideoSubtitleController {
         ? "pp-vsub-toggle-btn pp-vsub-toggle-floating"
         : targetBar.classList.contains("ytp-right-controls")
           ? "ytp-button pp-vsub-toggle-btn"
-          : "pp-vsub-toggle-btn";
+          : isBiliBar
+            ? "bpx-player-ctrl-btn pp-vsub-toggle-btn"
+            : "pp-vsub-toggle-btn";
       btn.innerHTML = `<span class="pp-vsub-icon-wrap">${SUBTITLE_BTN_ICON}</span>`;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1629,7 +1669,9 @@ export class VideoSubtitleController {
       btn.addEventListener("mouseleave", () => {
         this.scheduleCloseSettingsMenu();
       });
-      if (!isFloating && targetBar.firstChild) {
+      if (biliAnchor) {
+        targetBar.insertBefore(btn, biliAnchor);
+      } else if (!isFloating && targetBar.firstChild) {
         targetBar.insertBefore(btn, targetBar.firstChild);
       } else {
         targetBar.appendChild(btn);
@@ -1637,6 +1679,9 @@ export class VideoSubtitleController {
       this.toggleBtnEl = btn;
     } else {
       this.toggleBtnEl.classList.toggle("pp-vsub-toggle-floating", isFloating);
+      if (biliAnchor && this.toggleBtnEl.nextElementSibling !== biliAnchor) {
+        targetBar.insertBefore(this.toggleBtnEl, biliAnchor);
+      }
     }
 
     this.syncToggleButtonState();
