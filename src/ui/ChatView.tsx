@@ -105,9 +105,11 @@ export function ChatView({
     [tabKey],
   );
   const [input, setInput] = useState("");
+  const [quotedText, setQuotedText] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [previewAtt, setPreviewAtt] = useState<ChatAttachment | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [usePage, setUsePage] = useState(true);
   const [busy, setBusy] = useState<{ abort: () => void } | null>(null);
   const page = usePageContent(tab);
@@ -251,12 +253,14 @@ export function ChatView({
 
   async function send(text: string, kind?: "summary" | "agent", overrideAttachments?: ChatAttachment[]) {
     const activeAttachments = overrideAttachments ?? (kind === "summary" ? [] : attachments);
-    if ((!text.trim() && activeAttachments.length === 0) || busy) return;
+    const activeQuote = !kind && !overrideAttachments ? quotedText.trim() : "";
+    if ((!text.trim() && !activeQuote && activeAttachments.length === 0) || busy) return;
     if (!configured) return onSetup();
     const cmd = tr("agent.command");
     const isExplicitCmd = !kind && (text.trim().startsWith(cmd) || text.trim().startsWith("/act"));
     if (kind === "agent" || isExplicitCmd || (!kind && agentMode)) {
-      const task = text.trim().replace(cmd, "").replace(/^\/act/, "").trim();
+      const rawTask = text.trim().replace(cmd, "").replace(/^\/act/, "").trim();
+      const task = activeQuote ? `${rawTask}\n\n${activeQuote}`.trim() : rawTask;
       if (!task || !tab?.id) return setPageError(tr("agent.usage"));
       const nowKey = Date.now();
       const user: Msg = { id: `u${nowKey}`, role: "user", content: task, kind: "agent" };
@@ -270,12 +274,18 @@ export function ChatView({
       };
       setMessages((m) => [...m, user, asst]);
       setInput("");
+      setQuotedText("");
       return;
     }
+    const finalContent = activeQuote
+      ? text.trim()
+        ? `${tr("chat.askAbout", { quote: activeQuote.replace(/\n/g, "\n> ") })}${text.trim()}`
+        : tr("chat.explainPrompt", { quote: activeQuote.replace(/\n/g, "\n> ") })
+      : text.trim();
     const user: Msg = {
       id: `u${Date.now()}`,
       role: "user",
-      content: text.trim(),
+      content: finalContent,
       kind,
       ...(activeAttachments.length ? { attachments: activeAttachments } : {}),
     };
@@ -287,8 +297,12 @@ export function ChatView({
     }));
     setMessages((m) => [...m, user, asst]);
     setInput("");
+    if (composerRef.current) {
+      composerRef.current.style.height = "auto";
+    }
     if (!overrideAttachments && kind !== "summary") {
       setAttachments([]);
+      setQuotedText("");
     }
     const patch = (f: (x: Msg) => Msg) => setMessages((m) => m.map((x) => (x.id === asst.id ? f(x) : x)));
     // Busy from the start: reading a long PDF takes a while, and Stop must cancel it too.
@@ -362,26 +376,38 @@ export function ChatView({
   const summarize = () => send(tr("chat.summarizePage"), "summary");
   const summarizeVideo = () => send(tr("chat.summarizeVideo"), "summary");
 
-  // hand-offs from the page (context menu "summarize", selection card "ask in panel")
-  useEffect(() => {
+  // hand-offs from the page (context menu "summarize", selection toolbar / card "explain" & "ask in panel")
+  const consumeRef = useRef<() => Promise<void>>(async () => {});
+  consumeRef.current = async () => {
     if (!tab) return;
-    const consume = async () => {
-      const r = await chrome.storage.session.get("pendingAction");
-      const a = r.pendingAction as { type: string; tabId: number; at: number; text?: string } | undefined;
-      if (!a || a.tabId !== tab.id || Date.now() - a.at > 120_000) return; // 2 min: long enough to click the toolbar icon after the fallback toast
-      await chrome.storage.session.remove("pendingAction");
-      if (a.type === "summarize") summarize();
-      if (a.type === "ask" && a.text) {
-        setInput(tr("chat.askAbout", { quote: a.text.replace(/\n/g, "\n> ") }));
-        react("surprised");
-      }
+    const r = await chrome.storage.session.get("pendingAction");
+    const a = r.pendingAction as { type: string; tabId: number; at: number; text?: string } | undefined;
+    if (!a || a.tabId !== tab.id || Date.now() - a.at > 120_000) return; // 2 min: long enough to click the toolbar icon after the fallback toast
+    if ((a.type === "summarize" || a.type === "explain") && !providersObj.loaded) return;
+    await chrome.storage.session.remove("pendingAction");
+    if (a.type === "summarize") summarize();
+    if (a.type === "explain" && a.text) {
+      react("surprised");
+      void send(tr("chat.explainPrompt", { quote: a.text.replace(/\n/g, "\n> ") }));
+    }
+    if (a.type === "ask" && a.text) {
+      setQuotedText(a.text.trim());
+      react("surprised");
+      requestAnimationFrame(() => {
+        composerRef.current?.focus();
+      });
+    }
+  };
+  useEffect(() => {
+    void consumeRef.current();
+  }, [tab?.id, providersObj.loaded]);
+  useEffect(() => {
+    const onCh = (ch: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "session" && ch.pendingAction?.newValue) void consumeRef.current();
     };
-    consume();
-    const onCh = (ch: Record<string, chrome.storage.StorageChange>, area: string) => area === "session" && ch.pendingAction?.newValue && consume();
     chrome.storage.onChanged.addListener(onCh);
     return () => chrome.storage.onChanged.removeListener(onCh);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab?.id]);
+  }, []);
 
   async function toggleTranslate() {
     if (!tab) return;
@@ -419,7 +445,10 @@ export function ChatView({
     if (text === undefined) return;
     if (!text) return toast({ text: tr("chat.noSelection"), tone: "info" });
     react("surprised");
-    setInput((v) => (v.trim() ? `${v.trimEnd()}\n\n` : "") + tr("chat.askAbout", { quote: text.replace(/\n/g, "\n> ") }));
+    setQuotedText(text.trim());
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+    });
   }
 
   async function locate(text: string) {
@@ -552,7 +581,15 @@ export function ChatView({
               {tstate!.done < tstate!.total ? tr("chat.translating", { done: tstate!.done, total: tstate!.total }) : tr("chat.translatedTo", { lang: langLabel(settings.translation.targetLang), done: tstate!.done })}
               {tstate!.errors > 0 && <span className="text-destructive"> · {tstate!.errors} {tr("chat.failedSuffix")}</span>}
             </span>
-            <button onClick={toggleTranslate} className="rounded-sm px-2 py-0.5 font-medium text-foreground hover:bg-muted">{tr("chat.showOriginal")}</button>
+            <button
+              type="button"
+              onClick={toggleTranslate}
+              title={tr("chat.showOriginal")}
+              aria-label={tr("chat.showOriginal")}
+              className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+            </button>
           </div>
         )}
       </div>
@@ -576,8 +613,47 @@ export function ChatView({
               : "border-border focus-within:border-primary/45 focus-within:ring-ring/40",
           )}
         >
+          {quotedText && (
+            <div
+              data-testid="composer-quote"
+              title={tr("chat.quotedLabel")}
+              onClick={() =>
+                setPreviewAtt({
+                  id: "quote-preview",
+                  kind: "text",
+                  name: tr("chat.quotedLabel"),
+                  size: new Blob([quotedText]).size,
+                  mimeType: "text/plain",
+                  textContent: quotedText,
+                })
+              }
+              className="group relative mx-2.5 mt-2.5 flex cursor-pointer items-start gap-2 rounded-[14px] border border-border/75 bg-muted/50 px-3 py-2 pr-8 text-left transition hover:bg-muted/80 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]"
+            >
+              <span className="mt-0.5 w-[3px] shrink-0 self-stretch rounded-full bg-primary/75" aria-hidden="true" />
+              <TextQuote className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
+              <div
+                data-testid="composer-quote-text"
+                className="min-w-0 flex-1 line-clamp-2 break-words text-[12.5px] leading-[1.45] text-muted-foreground"
+              >
+                {quotedText}
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQuotedText("");
+                }}
+                title={tr("chat.removeQuote")}
+                aria-label={tr("chat.removeQuote")}
+                data-testid="remove-quote"
+                className="absolute right-2 top-2 grid size-5 place-items-center rounded-full text-muted-foreground transition hover:bg-background/90 hover:text-foreground"
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          )}
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-3 pt-3 pb-0.5" data-testid="composer-attachments">
+            <div className={cn("flex flex-wrap gap-2 px-3 pb-0.5", quotedText ? "pt-2" : "pt-3")} data-testid="composer-attachments">
               {attachments.map((att) => (
                 <AttachmentChip
                   key={att.id}
@@ -589,6 +665,7 @@ export function ChatView({
             </div>
           )}
           <textarea
+            ref={composerRef}
             data-testid="composer"
             rows={2}
             value={input}
@@ -606,8 +683,11 @@ export function ChatView({
                 send(input);
               }
             }}
-            placeholder={agentMode ? tr("agent.placeholder") : tr("chat.placeholder")}
-            className="block max-h-40 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70"
+            placeholder={agentMode ? tr("agent.placeholder") : quotedText ? tr("chat.quotePlaceholder") : tr("chat.placeholder")}
+            className={cn(
+              "block max-h-40 min-h-[56px] w-full resize-none bg-transparent px-4 text-[14px] leading-6 outline-none placeholder:text-muted-foreground/70",
+              quotedText || attachments.length > 0 ? "pt-2.5" : "pt-3.5",
+            )}
           />
           <input
             ref={fileInputRef}
@@ -627,23 +707,23 @@ export function ChatView({
             <button
               type="button"
               onClick={() => setAgentMode((v) => !v)}
-              title={tr("agent.modeTip")}
+              title={`${tr("agent.modeLabel")} · ${tr("agent.modeTip")}`}
+              aria-label={tr("agent.modeLabel")}
               aria-pressed={agentMode}
               data-testid="agent-mode-toggle"
               className={cn(
-                "inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition",
+                "grid size-8 place-items-center rounded-full transition",
                 agentMode
                   ? "bg-primary text-primary-foreground shadow-2xs"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
-              <Sparkles className="size-3.5 shrink-0" />
-              <span>{tr("agent.modeLabel")}</span>
+              <Sparkles className="size-[17px]" strokeWidth={1.9} aria-hidden="true" />
             </button>
             <div className="flex-1" />
             <Dropdown>
               <DropdownTrigger asChild>
-                <button data-testid="model-switch" className="flex h-8 min-w-0 max-w-[55%] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                <button data-testid="model-switch" className="flex h-8 min-w-0 max-w-[62%] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
                   {chatModel && <ProviderIcon presetId={chatModel.provider.presetId} size={14} />}
                   <span className="truncate">{chatModel ? chatModel.modelId : tr("chat.noModel")}</span>
                   <ChevronDown className="size-3.5 shrink-0" />
@@ -675,7 +755,7 @@ export function ChatView({
                 <Square className="size-3 fill-current" />
               </button>
             ) : (
-              <button onClick={() => send(input)} disabled={!input.trim() && attachments.length === 0} data-testid="send" aria-label={tr("chat.send")}
+              <button onClick={() => send(input)} disabled={!input.trim() && !quotedText.trim() && attachments.length === 0} data-testid="send" aria-label={tr("chat.send")}
                 className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-input disabled:text-muted-foreground">
                 <ArrowUp className="size-4" strokeWidth={2.4} />
               </button>
@@ -938,7 +1018,18 @@ function MessageItem({
       onLocate(li.textContent?.replace(/↩\s*$/, "").trim() ?? "");
     }
   };
-  if (m.role === "user")
+  if (m.role === "user") {
+    const askPrefix = tr("chat.askAbout", { quote: "" }).split("\n")[0];
+    const hasQuotePrefix = !m.kind && (m.content.startsWith(`${askPrefix}\n> `) || /^[^\n>]{1,32}[:：]\n> /.test(m.content));
+    const askQuoteMatch = hasQuotePrefix ? m.content.match(/^[^\n]+\n((?:> ?.*(?:\n|$))+)\n*([\s\S]*)$/) : null;
+    const quotedExcerpt = askQuoteMatch
+      ? askQuoteMatch[1]
+          .split("\n")
+          .map((line) => line.replace(/^> ?/, ""))
+          .join("\n")
+          .trim()
+      : "";
+    const bodyText = askQuoteMatch ? askQuoteMatch[2].trim() : m.content;
     return (
       <div className="flex animate-in flex-col items-end gap-1.5">
         {m.attachments && m.attachments.length > 0 && (
@@ -948,19 +1039,41 @@ function MessageItem({
             ))}
           </div>
         )}
-        {m.content && (
+        {quotedExcerpt && (
+          <div
+            data-testid="user-message-quote"
+            title={tr("chat.quotedLabel")}
+            onClick={() =>
+              onPreviewAttachment({
+                id: `${m.id}-quote`,
+                kind: "text",
+                name: tr("chat.quotedLabel"),
+                size: new Blob([quotedExcerpt]).size,
+                mimeType: "text/plain",
+                textContent: quotedExcerpt,
+              })
+            }
+            className="flex max-w-[85%] cursor-pointer items-start gap-2 rounded-[12px] border border-border/70 bg-muted/55 px-3 py-2 text-left text-[12.5px] leading-[1.45] text-muted-foreground transition hover:bg-muted/80 dark:bg-white/[0.05]"
+          >
+            <span className="mt-0.5 w-[3px] shrink-0 self-stretch rounded-full bg-primary/70" aria-hidden="true" />
+            <TextQuote className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="line-clamp-3 break-words">{quotedExcerpt}</span>
+          </div>
+        )}
+        {bodyText && (
           <div className="max-w-[85%] whitespace-pre-wrap rounded-card rounded-br-[6px] bg-primary-soft px-3.5 py-2 text-[14px] leading-6 text-foreground">
             {m.kind === "summary" ? (
-              <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{m.content}</span>
+              <span className="flex items-center gap-1.5"><FileText className="size-3.5 text-primary" />{bodyText}</span>
             ) : m.kind === "agent" ? (
-              <span className="flex items-center gap-1.5"><Sparkles className="size-3.5 text-primary shrink-0" /><span>{m.content}</span></span>
+              <span className="flex items-center gap-1.5"><Sparkles className="size-3.5 text-primary shrink-0" /><span>{bodyText}</span></span>
             ) : (
-              m.content
+              bodyText
             )}
           </div>
         )}
       </div>
     );
+  }
   if (m.agentRun) {
     return (
       <div className="animate-in space-y-2.5" data-testid="assistant-message" data-status={m.status}>

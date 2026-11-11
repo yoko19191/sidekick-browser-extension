@@ -1,5 +1,5 @@
 import {
-  CheckCircle2, ChevronDown, Database, Download, Eye, EyeOff, Globe2, Keyboard, KeyRound, Languages, Loader2, MessageSquareText, Monitor, Moon, MousePointerClick, Palette, Plus, RefreshCw, RotateCcw, ShieldCheck, Sun, Trash2, Upload, X, XCircle, Zap,
+  CheckCircle2, ChevronDown, Code2, Copy, Database, Download, Eye, EyeOff, Globe2, Keyboard, KeyRound, Languages, Loader2, MessageSquareText, Monitor, Moon, MousePointerClick, Palette, Plus, RefreshCw, RotateCcw, ShieldCheck, Star, Sun, Trash2, Upload, X, XCircle, Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { STYLE_LABELS } from "@/src/lib/batch";
@@ -234,8 +234,30 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
               {p.models.map((m, i) => (
                 <div key={m} className={cn("group flex items-center gap-2 px-3 py-2", i > 0 && "border-t border-border/60")}>
                   <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]">{m}</span>
-                  {i > 0 && <button className="text-[11.5px] text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100" onClick={() => persist({ ...p, models: [m, ...p.models.filter((x) => x !== m)] })}>{tr("opt.setDefault")}</button>}
-                  <button className="text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" aria-label={tr("common.remove")} onClick={() => persist({ ...p, models: p.models.filter((x) => x !== m) })}><X className="size-3.5" /></button>
+                  {i === 0 ? (
+                    <span title={tr("opt.setDefault")} aria-label={tr("opt.setDefault")} className="grid size-6 place-items-center text-primary">
+                      <Star className="size-3.5 fill-current" aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      title={tr("opt.setDefault")}
+                      aria-label={tr("opt.setDefault")}
+                      className="grid size-6 place-items-center rounded-sm text-muted-foreground opacity-0 transition hover:bg-muted hover:text-primary group-hover:opacity-100"
+                      onClick={() => persist({ ...p, models: [m, ...p.models.filter((x) => x !== m)] })}
+                    >
+                      <Star className="size-3.5" aria-hidden="true" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    title={tr("common.remove")}
+                    aria-label={tr("common.remove")}
+                    className="grid size-6 place-items-center rounded-sm text-muted-foreground opacity-0 transition hover:bg-muted hover:text-destructive group-hover:opacity-100"
+                    onClick={() => persist({ ...p, models: p.models.filter((x) => x !== m) })}
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
                 </div>
               ))}
               <div className="flex gap-2 border-t border-border/60 p-2">
@@ -407,7 +429,7 @@ export function AppearanceSection({ settings, update }: Ctx) {
     <>
       <SectionLabel>{tr("opt.theme")}</SectionLabel>
       <Card className="p-4">
-        <Segmented<ThemeMode> testId="theme" value={settings.theme} onChange={(v) => update((s) => ({ ...s, theme: v }))}
+        <Segmented<ThemeMode> testId="theme" iconOnly value={settings.theme} onChange={(v) => update((s) => ({ ...s, theme: v }))}
           options={[{ value: "system", label: tr("theme.system"), icon: Monitor }, { value: "light", label: tr("theme.light"), icon: Sun }, { value: "dark", label: tr("theme.dark"), icon: Moon }]} />
       </Card>
       <Hint>{tr("opt.themeHint")}</Hint>
@@ -725,15 +747,34 @@ function McpBridgeCard() {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Button size="sm" variant="secondary" icon={RefreshCw} onClick={applyConfig} testId="mcp-reconnect">
-            {tr("mcp.reconnect")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={copyMcpJson} testId="mcp-copy-config">
+          <button
+            type="button"
+            onClick={applyConfig}
+            title={tr("mcp.reconnect")}
+            aria-label={tr("mcp.reconnect")}
+            data-testid="mcp-reconnect"
+            className="grid size-7 place-items-center rounded-btn border border-border/70 bg-background text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            <RefreshCw className="size-3.5" aria-hidden="true" />
+          </button>
+          <Button size="sm" variant="outline" icon={Copy} onClick={copyMcpJson} testId="mcp-copy-config">
             {tr("mcp.copyConfig")}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setShowJson((v) => !v)}>
-            {showJson ? tr("mcp.hideConfig") : tr("mcp.showConfig")}
-          </Button>
+          <button
+            type="button"
+            onClick={() => setShowJson((v) => !v)}
+            title={showJson ? tr("mcp.hideConfig") : tr("mcp.showConfig")}
+            aria-label={showJson ? tr("mcp.hideConfig") : tr("mcp.showConfig")}
+            aria-expanded={showJson}
+            className={cn(
+              "grid size-7 place-items-center rounded-btn border transition",
+              showJson
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <Code2 className="size-3.5" aria-hidden="true" />
+          </button>
         </div>
       </div>
 
@@ -873,8 +914,14 @@ export function AgentSection() {
             {neverSites.map((s) => (
               <li key={s.site} className="flex items-center justify-between rounded-btn bg-background/70 px-3 py-2 text-[13px]">
                 <span className="font-mono text-[12.5px]">{s.site}</span>
-                <button className="text-[12px] text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "never")}>
-                  {tr("agent.remove")}
+                <button
+                  type="button"
+                  title={tr("agent.remove")}
+                  aria-label={tr("agent.remove")}
+                  className="grid size-6 place-items-center rounded-sm text-muted-foreground transition hover:bg-muted hover:text-destructive"
+                  onClick={() => remove(s.site, "never")}
+                >
+                  <X className="size-3.5" aria-hidden="true" />
                 </button>
               </li>
             ))}
@@ -896,8 +943,14 @@ export function AgentSection() {
                   <span className="font-mono text-[12.5px]">{s.site}</span>{" "}
                   <span className="text-[12px] text-muted-foreground">({s.kinds.join(", ")})</span>
                 </span>
-                <button className="text-[12px] text-muted-foreground hover:text-destructive" onClick={() => remove(s.site, "allow")}>
-                  {tr("agent.remove")}
+                <button
+                  type="button"
+                  title={tr("agent.remove")}
+                  aria-label={tr("agent.remove")}
+                  className="grid size-6 place-items-center rounded-sm text-muted-foreground transition hover:bg-muted hover:text-destructive"
+                  onClick={() => remove(s.site, "allow")}
+                >
+                  <X className="size-3.5" aria-hidden="true" />
                 </button>
               </li>
             ))}

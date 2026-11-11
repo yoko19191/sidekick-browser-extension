@@ -26,7 +26,9 @@ if (__E2E__) {
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type !== "dev:panel-state") return false;
     const composer = document.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
-    sendResponse({ url: location.href, composer: composer?.value ?? null });
+    const quote = document.querySelector<HTMLElement>('[data-testid="composer-quote-text"]');
+    const combined = [quote?.textContent, composer?.value].filter(Boolean).join("\n");
+    sendResponse({ url: location.href, composer: combined || (composer?.value ?? null) });
     return false;
   });
 }

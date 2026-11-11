@@ -104,17 +104,21 @@ export function Switch({ checked, onChange, label, testId }: { checked: boolean;
 }
 export const Toggle = Switch;
 
-export function Segmented<T extends string>({ value, options, onChange, testId, className }: { value: T; options: { value: T; label: string; icon?: LucideIcon }[]; onChange: (v: T) => void; testId?: string; className?: string }) {
+export function Segmented<T extends string>({ value, options, onChange, testId, className, iconOnly }: { value: T; options: { value: T; label: string; icon?: LucideIcon; iconOnly?: boolean }[]; onChange: (v: T) => void; testId?: string; className?: string; iconOnly?: boolean }) {
   return (
     <div className={cn("inline-flex rounded-btn bg-muted p-0.5", className)} data-testid={testId} role="radiogroup">
-      {options.map((o) => (
-        <button key={o.value} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)} data-value={o.value}
-          className={cn("flex flex-auto items-center justify-center gap-1 whitespace-nowrap rounded-sm px-2.5 py-1 text-[12px] font-medium transition-all",
-            value === o.value ? "bg-background text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06)]" : "text-muted-foreground hover:text-foreground")}>
-          {o.icon && <o.icon className="size-3.5 shrink-0" />}
-          <span>{o.label}</span>
-        </button>
-      ))}
+      {options.map((o) => {
+        const onlyIcon = Boolean((iconOnly || o.iconOnly) && o.icon);
+        return (
+          <button key={o.value} type="button" role="radio" aria-checked={value === o.value} aria-label={o.label} title={onlyIcon ? o.label : undefined} onClick={() => onChange(o.value)} data-value={o.value}
+            className={cn("flex flex-auto items-center justify-center gap-1 whitespace-nowrap rounded-sm py-1 text-[12px] font-medium transition-all",
+              onlyIcon ? "px-2" : "px-2.5",
+              value === o.value ? "bg-background text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06)]" : "text-muted-foreground hover:text-foreground")}>
+            {o.icon && <o.icon className="size-3.5 shrink-0" aria-hidden="true" />}
+            {!onlyIcon && <span>{o.label}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

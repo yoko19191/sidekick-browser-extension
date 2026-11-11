@@ -60,16 +60,27 @@ export default defineBackground({
       return { ...r, apiKey: keys.get(r.provider.id) };
     }
 
+    const injectingTabs = new Map<number, Promise<void>>();
     async function ensureContentScript(tabId: number) {
+      const existing = injectingTabs.get(tabId);
+      if (existing) return existing;
+      const job = (async () => {
+        try {
+          const pong = await chrome.tabs.sendMessage(tabId, { type: "pp:ping" });
+          if (pong?.ok) return;
+        } catch {
+          /* not injected yet */
+        }
+        await chrome.scripting.executeScript({ target: { tabId }, files: ["/content-scripts/content.js"] });
+        const s = await loadSettings();
+        await chrome.tabs.sendMessage(tabId, { type: "pp:config", settings: s.translation, uiLocale: s.uiLocale }).catch(() => {});
+      })();
+      injectingTabs.set(tabId, job);
       try {
-        const pong = await chrome.tabs.sendMessage(tabId, { type: "pp:ping" });
-        if (pong?.ok) return;
-      } catch {
-        /* not injected yet */
+        await job;
+      } finally {
+        injectingTabs.delete(tabId);
       }
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["/content-scripts/content.js"] });
-      const s = await loadSettings();
-      await chrome.tabs.sendMessage(tabId, { type: "pp:config", settings: s.translation }).catch(() => {});
     }
 
     const mcpBridge = new McpBridgeClient({
@@ -101,7 +112,7 @@ export default defineBackground({
       if (area !== "local" || !ch.settings) return;
       const s = await loadSettings();
       const tabs = await chrome.tabs.query({});
-      for (const t of tabs) if (t.id) chrome.tabs.sendMessage(t.id, { type: "pp:config", settings: s.translation }).catch(() => {});
+      for (const t of tabs) if (t.id) chrome.tabs.sendMessage(t.id, { type: "pp:config", settings: s.translation, uiLocale: s.uiLocale }).catch(() => {});
     });
 
     async function maybeAutoInjectTab(tabId: number, url?: string, allowAutoTranslate = true) {
@@ -259,7 +270,7 @@ export default defineBackground({
       // ---- from our content script (only text in / text out; never keys or provider config) ----
       switch (msg?.type) {
         case "pp:get-config":
-          return reply(loadSettings().then((s) => s.translation));
+          return reply(loadSettings().then((s) => ({ ...s.translation, uiLocale: s.uiLocale })));
         case "translate:batch":
           return reply(
             translateBatch(
@@ -284,6 +295,8 @@ export default defineBackground({
           return tabId ? reply(openPanelFor(tabId)) : false;
         case "panel:ask":
           return tabId ? reply(openPanelFor(tabId, { type: "ask", text: String(msg.text ?? "").slice(0, 4000) })) : false;
+        case "panel:explain":
+          return tabId ? reply(openPanelFor(tabId, { type: "explain", text: String(msg.text ?? "").slice(0, 4000) })) : false;
         // ---- diagnostics: e2e builds only ----
         case "sw:info":
           return __E2E__ ? reply(Promise.resolve({ bootId, maxIdleGapMs })) : false;

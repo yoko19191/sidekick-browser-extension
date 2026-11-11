@@ -5,7 +5,7 @@ import { PageUi } from "@/src/lib/page-ui";
 import { collectParagraphs, insertTranslation, markPending, restoreOriginal, setupHoverTranslate, TRANSLATION_CSS } from "@/src/lib/paragraphs";
 import { extractVideoTranscriptMarkdown, hasVideoSubtitlesAvailable, loadVideoSubtitleDomainEnabled, VIDEO_SUBTITLE_CSS, VideoSubtitleController } from "@/src/lib/video-subtitles";
 import type { Settings, TranslateState } from "@/src/lib/types";
-import { tr } from "@/src/i18n";
+import { setLocale, tr } from "@/src/i18n";
 import { handleAgentMessage } from "@/src/agent/page/content-host";
 import { hostPdfTab, isPdfDocument } from "@/src/lib/pdf/tab-host";
 
@@ -56,9 +56,11 @@ export default defineContentScript({
       onFabDismiss: () => ui.setFab(false),
       translateSelection: async (text) => (await send<{ translation: string }>({ type: "translate:selection", text })).translation,
       askInPanel: (text) => openPanel({ type: "panel:ask", text }),
+      explainInPanel: (text) => openPanel({ type: "panel:explain", text }),
     });
 
-    const applyConfig = (s: TSettings) => {
+    const applyConfig = (s: TSettings, uiLocale?: string) => {
+      if (uiLocale) setLocale(uiLocale);
       cfg = s;
       const never = s.neverSites.includes(host);
       ui.selectionEnabled = s.selectionTranslate && !never;
@@ -115,9 +117,9 @@ export default defineContentScript({
         return res?.[0] ?? "";
       },
     });
-    send<TSettings>({ type: "pp:get-config" })
+    send<TSettings & { uiLocale?: string }>({ type: "pp:get-config" })
       .then((s) => {
-        if (s && !cfg) applyConfig(s);
+        if (s && !cfg) applyConfig(s, s.uiLocale);
       })
       .catch(() => {});
 
@@ -315,7 +317,7 @@ export default defineContentScript({
           sendResponse({ ok: true });
           return;
         case "pp:config":
-          applyConfig(msg.settings);
+          applyConfig(msg.settings, msg.uiLocale);
           sendResponse({ ok: true });
           return;
         case "translate:toggle": {

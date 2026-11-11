@@ -235,25 +235,44 @@ test.describe.serial("翻翻 Sidekick v1", () => {
     await page.close();
   });
 
-  test("selection translation: icon → floating card → 'ask in side panel'; floating button present", async () => {
+  test("selection toolbar: Translate → floating card; Ask Sidekick & Explain → side panel; floating button present", async () => {
     const page = await openArticle();
     const panel = await openPanel(article);
     const ui = page.locator("sidekick-ui");
     await expect(ui.locator(".fab")).toBeVisible({ timeout: 10_000 }); // auto-injected where host access is granted
-    await page.evaluate(() => {
-      const p = [...document.querySelectorAll("article p")].find((x) => x.textContent!.includes("A vegetated roof works like a sponge"))!;
-      const r = document.createRange();
-      r.selectNodeContents(p);
-      const sel = getSelection()!;
-      sel.removeAllRanges();
-      sel.addRange(r);
-      const b = p.getBoundingClientRect();
-      p.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: b.right, clientY: b.bottom }));
-    });
+    const triggerSelect = () =>
+      page.evaluate(() => {
+        const p = [...document.querySelectorAll("article p")].find((x) => x.textContent!.includes("A vegetated roof works like a sponge"))!;
+        const r = document.createRange();
+        r.selectNodeContents(p);
+        const sel = getSelection()!;
+        sel.removeAllRanges();
+        sel.addRange(r);
+        const b = p.getBoundingClientRect();
+        p.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: b.right, clientY: b.bottom }));
+      });
+    await triggerSelect();
+    await expect(ui.getByTestId("pp-selection-toolbar")).toBeVisible();
+    await expect(ui.getByTestId("pp-selection-dot")).toHaveText("翻译");
+    await expect(ui.getByTestId("pp-selection-explain")).toHaveText("解释");
+    await expect(ui.getByTestId("pp-selection-ask")).toHaveText("问翻翻");
     await ui.getByTestId("pp-selection-dot").click();
     await expect(ui.locator(".card .out[data-done]")).toContainText("植被屋顶就像一块海绵");
     await ui.locator(".card .ask").click();
-    await expect(panel.getByTestId("composer")).toHaveValue(/A vegetated roof works like a sponge/, { timeout: 5000 });
+    await expect(panel.getByTestId("composer-quote-text")).toContainText("A vegetated roof works like a sponge", { timeout: 5000 });
+    // direct "Ask Sidekick / 问翻翻" from the selection toolbar
+    await panel.getByTestId("remove-quote").click();
+    await expect(panel.getByTestId("composer-quote")).toHaveCount(0);
+    await triggerSelect();
+    await ui.getByTestId("pp-selection-ask").click();
+    await expect(panel.getByTestId("composer-quote-text")).toContainText("A vegetated roof works like a sponge", { timeout: 5000 });
+    await panel.getByTestId("remove-quote").click();
+    // direct "Explain / 解释" from the selection toolbar streams explanation in the side panel
+    await triggerSelect();
+    await ui.getByTestId("pp-selection-explain").click();
+    const explainMsg = panel.getByTestId("assistant-message").last();
+    await expect(explainMsg).toHaveAttribute("data-status", "done", { timeout: 20_000 });
+    await panel.getByTestId("new-chat").click();
     // floating button toggles translation
     await ui.locator(".fab").click();
     await expect.poll(() => page.locator(".pp-trans").count(), { timeout: 15_000 }).toBeGreaterThan(3);
@@ -288,8 +307,8 @@ test.describe.serial("翻翻 Sidekick v1", () => {
       getSelection()!.addRange(r);
     });
     await panel.getByTestId("quote-selection").click();
-    await expect(panel.getByTestId("composer")).toHaveValue(/> A vegetated roof works like a sponge/);
-    await panel.getByTestId("composer").fill("");
+    await expect(panel.getByTestId("composer-quote-text")).toContainText("A vegetated roof works like a sponge");
+    await panel.getByTestId("remove-quote").click();
     await panel.getByTestId("action-explain").click();
     const msg = panel.getByTestId("assistant-message").last();
     await expect(msg).toHaveAttribute("data-status", "done", { timeout: 20_000 });

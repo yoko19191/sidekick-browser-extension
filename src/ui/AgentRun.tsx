@@ -104,31 +104,44 @@ export function AgentRun({
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           >
             {running ? (
-              <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden="true" />
             ) : (
               <Mascot state={mood} size={18} />
             )}
-            <span className="font-semibold text-foreground">{tr("agent.stepsHeader")}</span>
-            <span className="truncate text-[12.5px] text-muted-foreground">{stepSummaryText}</span>
+            <span className="truncate text-[12.5px] font-medium text-foreground">{stepSummaryText}</span>
             {expanded ? (
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             ) : (
-              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             )}
           </button>
           {running ? (
             <div className="flex shrink-0 items-center gap-1">
-              <Button size="sm" variant="outline" icon={Hand} onClick={stop} testId="agent-takeover">
-                {tr("agent.takeOver")}
-              </Button>
-              <Button size="sm" variant="outline" icon={Square} onClick={stop} testId="agent-stop">
-                {tr("agent.stop")}
-              </Button>
+              <button
+                type="button"
+                onClick={stop}
+                title={tr("agent.takeOver")}
+                aria-label={tr("agent.takeOver")}
+                data-testid="agent-takeover"
+                className="grid size-7 place-items-center rounded-md border border-border/80 bg-background text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <Hand className="size-3.5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={stop}
+                title={tr("agent.stop")}
+                aria-label={tr("agent.stop")}
+                data-testid="agent-stop"
+                className="grid size-7 place-items-center rounded-md bg-destructive/10 text-destructive transition hover:bg-destructive/18"
+              >
+                <Square className="size-3 fill-current" aria-hidden="true" />
+              </button>
             </div>
           ) : (
             onClose && (
-              <button onClick={onClose} aria-label={tr("agent.close")} className="opacity-60 hover:opacity-100">
-                <X className="size-4" />
+              <button onClick={onClose} title={tr("agent.close")} aria-label={tr("agent.close")} className="opacity-60 hover:opacity-100">
+                <X className="size-4" aria-hidden="true" />
               </button>
             )
           )}

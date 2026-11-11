@@ -219,6 +219,7 @@ export function SidebarSettings({
                   <Segmented<ThemeMode>
                     testId="settings-theme"
                     className="shrink-0"
+                    iconOnly
                     value={settings.theme}
                     onChange={(v) => update((s) => ({ ...s, theme: v }))}
                     options={[
