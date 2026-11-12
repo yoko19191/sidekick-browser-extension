@@ -42,6 +42,8 @@ export function Onboarding({ settings, update, providers, onDone }: { settings: 
     setSaved(null);
   };
 
+  const isCustomPreset = presetId.startsWith("custom");
+
   const draft = (overrideBaseUrl?: string, overrideModels?: string[]): ProviderConfig => {
     const p = saved ?? newProviderFromPreset(preset);
     const list = overrideModels ?? models;
@@ -51,7 +53,7 @@ export function Onboarding({ settings, update, providers, onDone }: { settings: 
       kind: preset.kind,
       presetId: preset.id,
       name: preset.name,
-      baseUrl: normalizeBaseUrl(overrideBaseUrl ?? (presetId === "custom" ? baseUrl : baseUrl || preset.baseUrl)),
+      baseUrl: normalizeBaseUrl(overrideBaseUrl ?? (isCustomPreset ? baseUrl : baseUrl || preset.baseUrl)),
       models: ordered,
     };
   };
@@ -202,10 +204,18 @@ export function Onboarding({ settings, update, providers, onDone }: { settings: 
                 </div>
               </div>
             </div>
-            {presetId === "custom" && (
+            {isCustomPreset && (
               <label className="mt-4 block">
-                <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">{tr("ob.baseUrlLabel")}</div>
-                <input data-testid="ob-base-url" className={cn(inputCls, "font-mono text-[12.5px]")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
+                <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+                  {presetId === "custom-anthropic" ? tr("ob.baseUrlLabelAnthropic") : tr("ob.baseUrlLabel")}
+                </div>
+                <input
+                  data-testid="ob-base-url"
+                  className={cn(inputCls, "font-mono text-[12.5px]")}
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder={presetId === "custom-anthropic" ? "https://api.example.com" : "https://api.example.com/v1"}
+                />
               </label>
             )}
           </>
@@ -364,7 +374,7 @@ export function Onboarding({ settings, update, providers, onDone }: { settings: 
       </div>
 
       <div className="pt-4">
-        {step === 0 && <Button size="lg" className="w-full" testId="ob-next" onClick={() => setStep(1)} disabled={presetId === "custom" && !/^https?:\/\/.+/.test(baseUrl.trim())}>{tr("common.next")} <ArrowRight /></Button>}
+        {step === 0 && <Button size="lg" className="w-full" testId="ob-next" onClick={() => setStep(1)} disabled={isCustomPreset && !/^https?:\/\/.+/.test(baseUrl.trim())}>{tr("common.next")} <ArrowRight /></Button>}
         {step === 1 && <Button size="lg" className="w-full" testId="ob-next" onClick={() => setStep(2)} disabled={test.state !== "ok"}>{tr("common.next")} <ArrowRight /></Button>}
         {step === 2 && <Button size="lg" className="w-full" testId="ob-finish" onClick={onDone}>{tr("ob.finish")}</Button>}
       </div>

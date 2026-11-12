@@ -1,3 +1,4 @@
+import { ensureAntigravityNetRules } from "./antigravity";
 import { COPILOT_HEADERS } from "./llm";
 import { oauthKey, secretKey, setKey, type OAuthProviderId } from "./providers";
 import { tr } from "@/src/i18n";
@@ -8,6 +9,7 @@ export interface StoredOAuthCreds {
   refresh?: string;
   expiresAt?: number;
   baseUrl?: string;
+  projectId?: string;
 }
 
 export type OAuthStartResult =
@@ -60,11 +62,39 @@ const ANTHROPIC_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ANTHROPIC_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback";
 const OPENROUTER_CALLBACK_URL = "https://openrouter.ai/?sidekick_oauth=1";
 
+const ANTIGRAVITY_CLIENT_ID = atob(
+  "MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==",
+);
+const ANTIGRAVITY_CLIENT_SECRET = atob("R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY=");
+const ANTIGRAVITY_REDIRECT_URI = "http://localhost:51121/oauth-callback";
+const ANTIGRAVITY_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const ANTIGRAVITY_TOKEN_URL = "https://oauth2.googleapis.com/token";
+export const ANTIGRAVITY_BASE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
+export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
+const ANTIGRAVITY_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/cclog",
+  "https://www.googleapis.com/auth/experimentsandconfigs",
+];
+
 /** Origins that should be requested in a user gesture before running OAuth for this provider. */
 export function oauthOrigins(oauthId: OAuthProviderId): string[] {
   switch (oauthId) {
     case "chatgpt":
-      return ["https://auth.openai.com/*", "https://chatgpt.com/*", "https://api.openai.com/*"];
+      return ["https://auth.openai.com/*", "https://chatgpt.com/*", "https://api.openai.com/*", "http://localhost/*", "http://127.0.0.1/*"];
+    case "antigravity":
+      return [
+        "https://accounts.google.com/*",
+        "https://oauth2.googleapis.com/*",
+        "https://www.googleapis.com/*",
+        "https://cloudcode-pa.googleapis.com/*",
+        "https://daily-cloudcode-pa.sandbox.googleapis.com/*",
+        "https://autopush-cloudcode-pa.sandbox.googleapis.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+      ];
     case "openrouter":
       return ["https://openrouter.ai/*"];
     case "github-copilot":
@@ -109,15 +139,33 @@ export function parseOAuthCodeInput(input: string): { code: string; state?: stri
     /* not a full URL */
   }
   if (trimmed.includes("code=")) {
-    const params = new URLSearchParams(trimmed.startsWith("?") ? trimmed.slice(1) : trimmed);
+    const qIdx = trimmed.indexOf("?");
+    const queryPart = qIdx >= 0 ? trimmed.slice(qIdx + 1) : trimmed;
+    const params = new URLSearchParams(queryPart.split("#")[0]);
     const code = params.get("code");
     if (code) return { code, state: params.get("state") ?? undefined };
   }
   if (trimmed.includes("#")) {
     const [code, state] = trimmed.split("#");
-    return { code: code.trim(), state: state?.trim() };
+    let decoded = code.trim();
+    if (/%[0-9A-Fa-f]{2}/.test(decoded)) {
+      try {
+        decoded = decodeURIComponent(decoded);
+      } catch {
+        /* ignore */
+      }
+    }
+    return { code: decoded, state: state?.trim() };
   }
-  return { code: trimmed };
+  let decoded = trimmed;
+  if (/%[0-9A-Fa-f]{2}/.test(decoded)) {
+    try {
+      decoded = decodeURIComponent(decoded);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { code: decoded };
 }
 
 function kimiHeaders(): Record<string, string> {
@@ -180,6 +228,90 @@ async function exchangeOpenAICodexCode(code: string, verifier: string, redirectU
   };
 }
 
+const projectCache = new Map<string, string>();
+
+export async function discoverAntigravityProject(accessToken: string): Promise<string> {
+  const cached = projectCache.get(accessToken);
+  if (cached) return cached;
+  await ensureAntigravityNetRules();
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": "antigravity/2.31.2 darwin/arm64",
+    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "Client-Metadata": JSON.stringify({
+      ideType: "IDE_UNSPECIFIED",
+      platform: "PLATFORM_UNSPECIFIED",
+      pluginType: "GEMINI",
+    }),
+  };
+  const endpoints = [ANTIGRAVITY_BASE_URL, "https://cloudcode-pa.googleapis.com"];
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(`${endpoint}/v1internal:loadCodeAssist`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          metadata: {
+            ideType: "IDE_UNSPECIFIED",
+            platform: "PLATFORM_UNSPECIFIED",
+            pluginType: "GEMINI",
+          },
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          cloudaicompanionProject?: string | { id?: string };
+          allowedTiers?: Array<{ id?: string; isDefault?: boolean }>;
+        };
+        if (typeof data.cloudaicompanionProject === "string" && data.cloudaicompanionProject) {
+          projectCache.set(accessToken, data.cloudaicompanionProject);
+          return data.cloudaicompanionProject;
+        }
+        if (
+          data.cloudaicompanionProject &&
+          typeof data.cloudaicompanionProject === "object" &&
+          data.cloudaicompanionProject.id
+        ) {
+          projectCache.set(accessToken, data.cloudaicompanionProject.id);
+          return data.cloudaicompanionProject.id;
+        }
+        if (Array.isArray(data.allowedTiers) && data.allowedTiers.length > 0) {
+          const defaultTier = data.allowedTiers.find((t) => t.isDefault) ?? data.allowedTiers[0];
+          const tierId = defaultTier?.id || "free-tier";
+          const onboardRes = await fetch(`${endpoint}/v1internal:onboardUser`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              tierId,
+              metadata: {
+                ideType: "IDE_UNSPECIFIED",
+                platform: "PLATFORM_UNSPECIFIED",
+                pluginType: "GEMINI",
+              },
+            }),
+          });
+          if (onboardRes.ok) {
+            const lro = (await onboardRes.json()) as {
+              done?: boolean;
+              response?: { cloudaicompanionProject?: { id?: string } | string };
+            };
+            const proj = lro.response?.cloudaicompanionProject;
+            const projId = typeof proj === "string" ? proj : proj?.id;
+            if (projId) {
+              projectCache.set(accessToken, projId);
+              return projId;
+            }
+          }
+        }
+      }
+    } catch {
+      /* try next endpoint */
+    }
+  }
+  return ANTIGRAVITY_DEFAULT_PROJECT_ID;
+}
+
 export async function getOAuthCreds(providerId: string): Promise<StoredOAuthCreds | undefined> {
   const k = oauthKey(providerId);
   const r = await chrome.storage.local.get(k);
@@ -197,8 +329,24 @@ export async function ensureFreshKey(providerId: string): Promise<string | undef
   const sk = secretKey(providerId);
   const ok = oauthKey(providerId);
   const r = await chrome.storage.local.get([sk, ok]);
-  const currentKey = typeof r[sk] === "string" && r[sk] ? (r[sk] as string) : undefined;
+  let currentKey = typeof r[sk] === "string" && r[sk] ? (r[sk] as string).trim() : undefined;
   const creds = r[ok] && typeof r[ok] === "object" && "access" in (r[ok] as object) ? (r[ok] as StoredOAuthCreds) : undefined;
+  if (currentKey?.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(currentKey) as { token?: string; projectId?: string };
+      if (typeof parsed?.token === "string" && parsed.token.trim()) {
+        currentKey = parsed.token.trim();
+        await setKey(providerId, currentKey);
+        if (creds) {
+          creds.access = currentKey;
+          if (parsed.projectId && !creds.projectId) creds.projectId = parsed.projectId;
+          await chrome.storage.local.set({ [ok]: creds });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   if (!creds || !creds.expiresAt || Date.now() < creds.expiresAt || !creds.refresh) return currentKey;
   try {
     const refreshed = await refreshOAuthCreds(creds);
@@ -277,6 +425,39 @@ export async function refreshOAuthCreds(creds: StoredOAuthCreds): Promise<Stored
       access: data.access_token,
       refresh: data.refresh_token || creds.refresh,
       expiresAt: Date.now() + data.expires_in * 1000 - 5 * 60 * 1000,
+    };
+  }
+  if (creds.oauthId === "antigravity") {
+    const res = await fetch(ANTIGRAVITY_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        client_id: ANTIGRAVITY_CLIENT_ID,
+        client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        refresh_token: creds.refresh,
+        grant_type: "refresh_token",
+      }),
+    });
+    if (!res.ok) throw new Error(`Antigravity token refresh failed: HTTP ${res.status}`);
+    const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
+    let projectId = creds.projectId;
+    if (!projectId && creds.access.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(creds.access) as { projectId?: string };
+        if (parsed?.projectId) projectId = parsed.projectId;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!projectId || projectId === ANTIGRAVITY_DEFAULT_PROJECT_ID) {
+      projectId = await discoverAntigravityProject(data.access_token);
+    }
+    return {
+      ...creds,
+      access: data.access_token,
+      refresh: data.refresh_token || creds.refresh,
+      expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000 - 5 * 60 * 1000,
+      projectId,
     };
   }
   return creds;
@@ -383,6 +564,32 @@ export async function startOAuthFlow(oauthId: OAuthProviderId, providerId: strin
     return { flow: "pkce", sessionId, authorizeUrl };
   }
 
+  if (oauthId === "antigravity") {
+    const { verifier, challenge } = await generatePKCE();
+    const params = new URLSearchParams({
+      client_id: ANTIGRAVITY_CLIENT_ID,
+      response_type: "code",
+      redirect_uri: ANTIGRAVITY_REDIRECT_URI,
+      scope: ANTIGRAVITY_SCOPES.join(" "),
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      state: verifier,
+      access_type: "offline",
+      prompt: "consent",
+    });
+    const authorizeUrl = `${ANTIGRAVITY_AUTH_URL}?${params.toString()}`;
+    sessions.set(sessionId, {
+      id: sessionId,
+      oauthId,
+      providerId,
+      flow: "pkce",
+      verifier,
+      redirectUri: ANTIGRAVITY_REDIRECT_URI,
+      expiresAt: Date.now() + 15 * 60 * 1000,
+    });
+    return { flow: "pkce", sessionId, authorizeUrl };
+  }
+
   if (oauthId === "github-copilot") {
     const res = await fetch("https://github.com/login/device/code", {
       method: "POST",
@@ -470,6 +677,24 @@ export async function pollOAuthSession(sessionId: string): Promise<OAuthPollResu
     throw new Error(tr("oauth.expired"));
   }
   if (s.flow === "pkce") {
+    try {
+      const tabs = (await chrome.tabs?.query?.({})) ?? [];
+      for (const t of tabs) {
+        const u = t.pendingUrl || t.url;
+        if (u && u.includes("code=")) {
+          const captured = await tryCaptureOAuthTabUrl(u);
+          if (captured && t.id && /^http:\/\/(localhost|127\.0\.0\.1):/.test(u)) {
+            chrome.tabs.remove(t.id).catch(() => {});
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (s.completedKey) {
+      sessions.delete(sessionId);
+      return { status: "complete", apiKey: s.completedKey, baseUrl: s.completedBaseUrl };
+    }
     return { status: "pending", intervalMs: 1500 };
   }
 
@@ -705,6 +930,42 @@ export async function exchangeOAuthCode(sessionId: string, rawInput: string): Pr
     return { apiKey: data.access_token };
   }
 
+  if (s.oauthId === "antigravity") {
+    if (state && state !== s.verifier) {
+      throw new Error("OAuth state mismatch");
+    }
+    const res = await fetch(ANTIGRAVITY_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        client_id: ANTIGRAVITY_CLIENT_ID,
+        client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: s.redirectUri || ANTIGRAVITY_REDIRECT_URI,
+        code_verifier: s.verifier,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Antigravity OAuth failed: HTTP ${res.status} ${text.slice(0, 120)}`);
+    }
+    const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
+    const projectId = await discoverAntigravityProject(data.access_token);
+    const expiresAt = Date.now() + (data.expires_in ?? 3600) * 1000 - 5 * 60 * 1000;
+    await setOAuthCreds(s.providerId, {
+      oauthId: "antigravity",
+      access: data.access_token,
+      refresh: data.refresh_token,
+      expiresAt,
+      baseUrl: ANTIGRAVITY_BASE_URL,
+      projectId,
+    });
+    s.completedKey = data.access_token;
+    s.completedBaseUrl = ANTIGRAVITY_BASE_URL;
+    return { apiKey: data.access_token, baseUrl: ANTIGRAVITY_BASE_URL };
+  }
+
   throw new Error(tr("err.unknown"));
 }
 
@@ -713,9 +974,16 @@ export async function tryCaptureOAuthTabUrl(url: string): Promise<boolean> {
   if (!url.includes("code=")) return false;
   const isOpenRouter = url.startsWith("https://openrouter.ai/") && url.includes("sidekick_oauth=1");
   const isChatGPTLocal = /^http:\/\/(localhost|127\.0\.0\.1):1455\/auth\/callback/.test(url);
-  if (!isOpenRouter && !isChatGPTLocal) return false;
+  const isAntigravityLocal = /^http:\/\/(localhost|127\.0\.0\.1):51121\/oauth-callback/.test(url);
+  if (!isOpenRouter && !isChatGPTLocal && !isAntigravityLocal) return false;
   for (const s of sessions.values()) {
-    if (s.flow === "pkce" && !s.completedKey && ((isOpenRouter && s.oauthId === "openrouter") || (isChatGPTLocal && s.oauthId === "chatgpt"))) {
+    if (
+      s.flow === "pkce" &&
+      !s.completedKey &&
+      ((isOpenRouter && s.oauthId === "openrouter") ||
+        (isChatGPTLocal && s.oauthId === "chatgpt") ||
+        (isAntigravityLocal && s.oauthId === "antigravity"))
+    ) {
       try {
         await exchangeOAuthCode(s.id, url);
         return true;

@@ -1,6 +1,7 @@
 import { Globe2 } from "lucide-react";
 import { useId, useMemo } from "react";
 import anthropicSvg from "@lobehub/icons-static-svg/icons/claude-color.svg?raw";
+import antigravitySvg from "@lobehub/icons-static-svg/icons/antigravity-color.svg?raw";
 import deepseekSvg from "@lobehub/icons-static-svg/icons/deepseek-color.svg?raw";
 import doubaoSvg from "@lobehub/icons-static-svg/icons/doubao-color.svg?raw";
 import geminiSvg from "@lobehub/icons-static-svg/icons/gemini-color.svg?raw";
@@ -27,6 +28,7 @@ const PROVIDER_SVGS: Record<string, string> = {
   zhipu: zhipuSvg,
   openrouter: openrouterSvg,
   anthropic: anthropicSvg,
+  antigravity: antigravitySvg,
   gemini: geminiSvg,
   ollama: ollamaSvg,
   "github-copilot": githubCopilotSvg,

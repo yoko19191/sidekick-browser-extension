@@ -1,6 +1,7 @@
 import { TranslationCache } from "@/src/lib/cache";
 import { buildSubtitleTranslatePrompt, buildTranslatePrompt, parseTranslationResponse } from "@/src/lib/batch";
 import { promptVariant, translationCacheKey } from "@/src/lib/hash";
+import { ensureAntigravityNetRules } from "@/src/lib/antigravity";
 import { listModels, streamText, testConnection } from "@/src/lib/llm";
 import { cleanGeneratedTitle, deriveChatTitle, LONG_PAGE_CHARS, mapConcurrent, pageSystemPrompt, planChatExcerpts, planLongSummary, sectionPrompt, SUMMARY_CONCURRENCY, summaryInstruction, videoSummaryInstruction } from "@/src/lib/prompts";
 import { friendlyError, keyOptional, loadProviders, redactSecrets, resolveModelRef, type OAuthProviderId } from "@/src/lib/providers";
@@ -32,6 +33,7 @@ export default defineBackground({
     };
 
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+    void ensureAntigravityNetRules();
     // Keys live in storage.local; restrict it to trusted extension contexts where supported.
     try {
       (chrome.storage.local as unknown as { setAccessLevel?: (o: object) => Promise<void> })
@@ -150,8 +152,13 @@ export default defineBackground({
 
     // Auto-inject only where the user granted host access: floating button, selection translation, video subtitle switch, per-site auto-translate.
     chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-      if (tab.url && tab.url.includes("code=")) {
-        void tryCaptureOAuthTabUrl(tab.url);
+      const oauthUrl = info.url || tab.pendingUrl || tab.url;
+      if (oauthUrl && oauthUrl.includes("code=")) {
+        void tryCaptureOAuthTabUrl(oauthUrl).then((captured) => {
+          if (captured && /^http:\/\/(localhost|127\.0\.0\.1):/.test(oauthUrl)) {
+            chrome.tabs.remove(tabId).catch(() => {});
+          }
+        });
       }
       if ((info.status !== "complete" && !info.url) || !tab.url || !/^https?:/.test(tab.url)) return;
       await maybeAutoInjectTab(tabId, tab.url, info.status === "complete");

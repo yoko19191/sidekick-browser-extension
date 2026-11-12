@@ -29,6 +29,7 @@ export const zh_CN = {
   // ---- 首次引导 ----
   "ob.badBaseUrl": "Base URL 格式不正确",
   "ob.baseUrlLabel": "Base URL（OpenAI 兼容）",
+  "ob.baseUrlLabelAnthropic": "Base URL（Anthropic 兼容）",
   "ob.fetchModels": "获取模型列表",
   "ob.finish": "开始使用",
   "ob.getKey": "去获取 Key",
@@ -180,7 +181,10 @@ export const zh_CN = {
   "err.unknown": "未知错误",
   "err.unparsable": "模型返回格式无法解析",
   // ---- 服务商预设 ----
+  "preset.antigravity": "Google Antigravity",
   "preset.custom": "自定义（OpenAI 兼容）",
+  "preset.customAnthropic": "自定义（Anthropic 兼容）",
+  "preset.customAnthropicHint": "填写任意 Anthropic 兼容接口的 Base URL",
   "preset.customHint": "填写任意 OpenAI 兼容接口的 Base URL",
   "preset.githubCopilot": "GitHub Copilot",
   "preset.groq": "Groq",
@@ -282,6 +286,7 @@ export const zh_CN = {
   "opt.notSet": "未设置",
   "opt.notSettingsFile": "不是翻翻的设置文件",
   "opt.openPanel": "打开侧栏",
+  "opt.customProviders": "自定义",
   "opt.openaiCompatible": "OpenAI 兼容",
   "opt.otherProtocols": "其他协议",
   "opt.pageTitle": "翻翻 Sidekick · 设置",

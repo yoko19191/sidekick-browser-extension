@@ -38,7 +38,7 @@ describe("model resolution", () => {
     expect(parseModelRef(modelRef("p::x", "m"))).toEqual({ providerId: "p", modelId: "x::m" });
   });
   it("every preset (except custom) ships default models so adding a key is enough", () => {
-    for (const p of PRESETS.filter((x) => x.id !== "custom")) {
+    for (const p of PRESETS.filter((x) => !x.id.startsWith("custom"))) {
       expect(p.models.length).toBeGreaterThan(0);
       expect(p.baseUrl).toMatch(/^https?:\/\//);
     }
@@ -65,8 +65,10 @@ describe("settings defaults", () => {
 });
 
 import { friendlyError } from "@/src/lib/providers";
-import { inferModelMeta, isChatGPTOAuthToken, toPiModel } from "@/src/lib/llm";
-import { generatePKCE, oauthOrigins, parseOAuthCodeInput } from "@/src/lib/oauth";
+import { inferModelMeta, isAntigravityOAuthToken, isChatGPTOAuthToken, listModels, toPiModel } from "@/src/lib/llm";
+import { buildAntigravityRequest, parseAntigravityCredentials } from "@/src/lib/antigravity";
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import { generatePKCE, oauthOrigins, parseOAuthCodeInput, startOAuthFlow } from "@/src/lib/oauth";
 import { cleanGeneratedTitle, deriveChatTitle, displayPageTitle } from "@/src/lib/prompts";
 import { hasProviderIcon } from "@/src/ui/components/ProviderIcon";
 
@@ -92,19 +94,72 @@ describe("inferModelMeta", () => {
 
 describe("provider icons and OAuth helpers", () => {
   it("ships LobeHub SVG icons for all named presets (except custom)", () => {
-    for (const p of PRESETS.filter((x) => x.id !== "custom")) {
+    for (const p of PRESETS.filter((x) => !x.id.startsWith("custom"))) {
       expect(hasProviderIcon(p.id), `icon for ${p.id}`).toBe(true);
     }
     expect(hasProviderIcon("custom")).toBe(false);
+    expect(hasProviderIcon("custom-anthropic")).toBe(false);
   });
 
-  it("includes OAuth-capable presets (including ChatGPT) and origin lists", () => {
+  it("includes OAuth-capable presets (including ChatGPT and Antigravity) and origin lists", () => {
     const oauthPresets = PRESETS.filter((p) => p.oauth);
     expect(oauthPresets.map((p) => p.id)).toEqual(
-      expect.arrayContaining(["openai", "openrouter", "github-copilot", "kimi-coding", "xai", "anthropic", "meta"]),
+      expect.arrayContaining(["openai", "antigravity", "openrouter", "github-copilot", "kimi-coding", "xai", "anthropic", "meta"]),
     );
     for (const p of oauthPresets) {
       expect(oauthOrigins(p.oauth!).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("supports Antigravity OAuth PKCE flow, credential parsing, and Cloud Code Assist model routing", async () => {
+    const rawToken = "ya29.a0AfH6SMB_test_token_1234567890";
+    const agCreds = JSON.stringify({ token: rawToken, projectId: "custom-proj-123" });
+    expect(isAntigravityOAuthToken(agCreds)).toBe(true);
+    expect(isAntigravityOAuthToken(rawToken)).toBe(true);
+    expect(isAntigravityOAuthToken("sk-proj-123")).toBe(false);
+    expect(parseAntigravityCredentials(agCreds)).toEqual({
+      token: rawToken,
+      projectId: "custom-proj-123",
+      explicitProject: true,
+    });
+    expect(parseAntigravityCredentials(rawToken)).toEqual({
+      token: rawToken,
+      projectId: "rising-fact-p41fc",
+      explicitProject: false,
+    });
+    expect(maskKey(agCreds)).toBe("ya29.••••7890");
+    expect(maskKey(rawToken)).toBe("ya29.••••7890");
+    expect(redactSecrets(`Failed with token ${rawToken}`, [agCreds])).toBe("Failed with token [redacted]");
+
+    const agPreset = newProviderFromPreset(PRESETS.find((p) => p.id === "antigravity")!);
+    const agModel = toPiModel(agPreset, "gemini-3.8-flash-high", agCreds);
+    expect(agModel.api).toBe("google-gemini-cli");
+    expect(agModel.provider).toBe("google-antigravity");
+    expect(agModel.baseUrl).toBe("https://daily-cloudcode-pa.sandbox.googleapis.com");
+
+    const models = await listModels(agPreset, agCreds);
+    expect(models).toContain("gemini-3.8-flash-high");
+    expect(models).toContain("claude-sonnet-5-5-medium");
+
+    const req = buildAntigravityRequest(
+      agModel,
+      normalizeContext({
+        systemPrompt: "Be concise.",
+        messages: [{ role: "user", content: "Hello", timestamp: Date.now() }],
+      }),
+      "rising-fact-p41fc",
+      { maxTokens: 16 },
+    );
+    expect(req.project).toBe("rising-fact-p41fc");
+    expect(req.model).toBe("gemini-3.8-flash-high");
+    expect(req.requestType).toBe("agent");
+    expect(req.userAgent).toBe("antigravity");
+
+    const flow = await startOAuthFlow("antigravity", agPreset.id);
+    expect(flow.flow).toBe("pkce");
+    if (flow.flow === "pkce") {
+      expect(flow.authorizeUrl).toContain("accounts.google.com/o/oauth2/v2/auth");
+      expect(flow.authorizeUrl).toContain(encodeURIComponent("http://localhost:51121/oauth-callback"));
     }
   });
 
@@ -131,6 +186,15 @@ describe("provider icons and OAuth helpers", () => {
       code: "abc123",
       state: "xyz",
     });
+    expect(
+      parseOAuthCodeInput(
+        "http://localhost:51121/oauth-callback?state=st_123&code=4%2F0AeanS0a_test_code&scope=email+profile",
+      ),
+    ).toEqual({
+      code: "4/0AeanS0a_test_code",
+      state: "st_123",
+    });
+    expect(parseOAuthCodeInput("4%2F0AeanS0a_test_code")).toEqual({ code: "4/0AeanS0a_test_code" });
     expect(parseOAuthCodeInput("my-code#my-state")).toEqual({ code: "my-code", state: "my-state" });
     expect(parseOAuthCodeInput("  raw-code-99  ")).toEqual({ code: "raw-code-99" });
   });

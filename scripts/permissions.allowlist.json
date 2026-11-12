@@ -1,5 +1,13 @@
 {
-  "permissions": ["activeTab", "contextMenus", "debugger", "scripting", "sidePanel", "storage"],
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "debugger",
+    "declarativeNetRequestWithHostAccess",
+    "scripting",
+    "sidePanel",
+    "storage"
+  ],
   "optional_permissions": ["userScripts"],
   "host_permissions": [],
   "optional_host_permissions": ["<all_urls>"]

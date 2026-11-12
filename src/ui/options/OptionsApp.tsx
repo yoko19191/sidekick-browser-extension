@@ -103,20 +103,26 @@ export function ModelsSection({ settings, update, providers }: Ctx) {
         <Dropdown>
           <DropdownTrigger asChild><Button size="sm" icon={Plus} testId="add-provider" className="mb-2">{tr("opt.addProvider")}</Button></DropdownTrigger>
           <DropdownContent align="end">
-            <DropdownLabel>{tr("opt.openaiCompatible")}</DropdownLabel>
-            {PRESETS.filter((p) => p.kind === "openai-compatible").map((p) => (
+            <DropdownLabel>{tr("ob.providerGroupOAuth")}</DropdownLabel>
+            {PRESETS.filter((p) => p.oauth).map((p) => (
               <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>
                 <ProviderIcon presetId={p.id} size={15} />
                 <span className="truncate">{p.name}</span>
-                {p.oauth && <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{tr("oauth.badge")}</span>}
+                <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{tr("oauth.badge")}</span>
               </DropdownItem>
             ))}
-            <DropdownLabel>{tr("opt.otherProtocols")}</DropdownLabel>
-            {PRESETS.filter((p) => p.kind !== "openai-compatible").map((p) => (
+            <DropdownLabel>{tr("ob.providerGroupKey")}</DropdownLabel>
+            {PRESETS.filter((p) => !p.oauth && !p.id.startsWith("custom")).map((p) => (
               <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>
                 <ProviderIcon presetId={p.id} size={15} />
                 <span className="truncate">{p.name}</span>
-                {p.oauth && <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">{tr("oauth.badge")}</span>}
+              </DropdownItem>
+            ))}
+            <DropdownLabel>{tr("opt.customProviders")}</DropdownLabel>
+            {PRESETS.filter((p) => p.id.startsWith("custom")).map((p) => (
+              <DropdownItem key={p.id} testId={`preset-${p.id}`} onSelect={() => add(p.id)}>
+                <ProviderIcon presetId={p.id} size={15} />
+                <span className="truncate">{p.name}</span>
               </DropdownItem>
             ))}
           </DropdownContent>
@@ -168,7 +174,9 @@ function ProviderCard({ p, masked, open, onToggle, providers }: { p: ProviderCon
     try {
       const r = await bg<{ latencyMs: number; model: string; models: string[] }>({ type: "provider:test", provider: p, modelId: p.models[0] });
       setTest({ state: "ok", msg: tr("ob.testOk", { model: r.model, secs: (r.latencyMs / 1000).toFixed(1) }) });
-      if (r.models?.length && !p.models.length) persist({ ...p, models: r.models.slice(0, 50) });
+      if (r.models?.length && (!p.models.length || p.presetId === "antigravity")) {
+        persist({ ...p, models: [...new Set([r.model, ...r.models])].filter(Boolean).slice(0, 80) });
+      }
     } catch (e) {
       setTest({ state: "fail", msg: (e as Error).message });
     }

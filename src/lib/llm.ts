@@ -8,10 +8,14 @@ import { streamSimple as openaiStream } from "@earendil-works/pi-ai/api/openai-c
 import { stream as codexRawStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { streamSimple as geminiStream } from "@earendil-works/pi-ai/api/google-generative-ai";
-import { normalizeBaseUrl, redactSecrets } from "./providers";
+import { fetchAntigravityModels, isAntigravityOAuthToken, streamAntigravity } from "./antigravity";
+import { ANTIGRAVITY_BASE_URL } from "./oauth";
+import { ANTIGRAVITY_MODELS, normalizeBaseUrl, redactSecrets } from "./providers";
 import type { ChatTurn, ProviderConfig, ProviderKind } from "./types";
 import { tr } from "@/src/i18n";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
+
+export { isAntigravityOAuthToken };
 
 const API_OF: Record<ProviderKind, Api> = {
   "openai-compatible": "openai-completions",
@@ -42,17 +46,26 @@ export function isChatGPTOAuthToken(apiKey?: string): boolean {
   }
 }
 
+export function isAntigravityProvider(p: ProviderConfig, apiKey?: string): boolean {
+  return (
+    p.presetId === "antigravity" ||
+    isAntigravityOAuthToken(apiKey) ||
+    p.baseUrl.includes("cloudcode-pa.googleapis.com") ||
+    p.baseUrl.includes("cloudcode-pa.sandbox.googleapis.com")
+  );
+}
+
 export function inferModelMeta(modelId: string, kind: ProviderKind): { reasoning: boolean; contextWindow: number; maxTokens: number } {
   const m = modelId.toLowerCase();
-  const reasoning = /reason|thinking|\br[12]\b|\bo[134](?:-|\b)|\bqwq\b|zero-preview|\bgemini-2\.5|\bcodex/i.test(m);
+  const reasoning = /reason|thinking|\br[12]\b|\bo[134](?:-|\b)|\bqwq\b|zero-preview|\bgemini-(?:2\.5|3)|\bcodex/i.test(m);
   let contextWindow = 128000;
   const kMatch = m.match(/(?:^|[-_:])(\d+)k(?:\b|$)/);
   if (kMatch) {
     contextWindow = Number(kMatch[1]) * 1024;
-  } else if (kind === "gemini" || /\bgemini-(?:1\.5|2\.)|\bgpt-4\.1/i.test(m)) {
-    contextWindow = 1_000_000;
-  } else if (kind === "anthropic" || /\bclaude-(?:3|4|sonnet|opus|haiku)/i.test(m)) {
+  } else if (/\bclaude-(?:3|4|sonnet|opus|haiku)/i.test(m) || kind === "anthropic") {
     contextWindow = 200_000;
+  } else if (kind === "gemini" || /\bgemini-(?:1\.5|2\.|3)|\bgpt-4\.1/i.test(m)) {
+    contextWindow = 1_000_000;
   }
   const maxTokens = reasoning ? 16384 : contextWindow <= 8192 ? 2048 : 8192;
   return { reasoning, contextWindow, maxTokens };
@@ -62,12 +75,27 @@ export function toPiModel(p: ProviderConfig, modelId: string, apiKey?: string): 
   const meta = inferModelMeta(modelId, p.kind);
   const isCopilot = p.presetId === "github-copilot";
   const isCodex = isChatGPTOAuthToken(apiKey) || p.baseUrl.includes("chatgpt.com/backend-api");
+  const isAntigravity = isAntigravityProvider(p, apiKey);
   return {
     id: modelId,
     name: modelId,
-    api: isCodex ? "openai-codex-responses" : API_OF[p.kind],
-    provider: isCodex ? "openai-codex" : isCopilot ? "github-copilot" : `sidekick-${p.presetId}`,
-    baseUrl: isCodex ? "https://chatgpt.com/backend-api" : normalizeBaseUrl(p.baseUrl),
+    api: isCodex
+      ? "openai-codex-responses"
+      : isAntigravity
+        ? ("google-gemini-cli" as Api)
+        : API_OF[p.kind],
+    provider: isCodex
+      ? "openai-codex"
+      : isAntigravity
+        ? "google-antigravity"
+        : isCopilot
+          ? "github-copilot"
+          : `sidekick-${p.presetId}`,
+    baseUrl: isCodex
+      ? "https://chatgpt.com/backend-api"
+      : isAntigravity
+        ? normalizeBaseUrl(p.baseUrl) || ANTIGRAVITY_BASE_URL
+        : normalizeBaseUrl(p.baseUrl),
     reasoning: meta.reasoning,
     input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -94,6 +122,7 @@ const codexStream: typeof openaiStream = (model, context, options) =>
 
 function streamFor(kind: ProviderKind, api?: Api) {
   if (api === "openai-codex-responses") return codexStream;
+  if (api === ("google-gemini-cli" as Api)) return streamAntigravity as unknown as typeof openaiStream;
   return kind === "anthropic" ? anthropicStream : kind === "gemini" ? geminiStream : openaiStream;
 }
 
@@ -183,6 +212,17 @@ export async function listModels(p: ProviderConfig, apiKey?: string, signal?: Ab
   if (isChatGPTOAuthToken(apiKey) || p.baseUrl.includes("chatgpt.com/backend-api")) {
     return [...CHATGPT_CODEX_MODELS];
   }
+  if (isAntigravityProvider(p, apiKey)) {
+    if (apiKey?.trim()) {
+      try {
+        const fetched = await fetchAntigravityModels(p.baseUrl, apiKey, signal);
+        if (fetched.length > 0) return fetched;
+      } catch {
+        /* fall back to built-in Antigravity model list if offline or mock */
+      }
+    }
+    return [...ANTIGRAVITY_MODELS];
+  }
   const base = normalizeBaseUrl(p.baseUrl);
   let res: Response;
   if (p.kind === "anthropic") {
@@ -221,7 +261,10 @@ export async function testConnection(p: ProviderConfig, modelId: string | undefi
   } catch (e) {
     listError = (e as Error).message;
   }
-  const target = modelId ?? models[0] ?? p.models[0];
+  let target = modelId ?? models[0] ?? p.models[0];
+  if (target && models.length > 0 && !models.includes(target) && isAntigravityProvider(p, apiKey)) {
+    target = models[0];
+  }
   if (!target) throw new Error(listError ?? tr("err.noTestModel"));
   // A tiny completion verifies the key + model actually work.
   const r = await streamText({ provider: p, modelId: target, apiKey, messages: [{ role: "user", content: "Reply with: ok" }], maxTokens: 16, signal: AbortSignal.timeout(30000) });

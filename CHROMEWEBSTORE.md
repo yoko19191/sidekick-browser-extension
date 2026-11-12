@@ -70,13 +70,13 @@ Translates web pages and video subtitles side-by-side and provides AI-powered pa
 | Asset | Dimensions | Status | Filename |
 |-------|-----------|--------|----------|
 | Store Icon [REQUIRED] | 128×128 PNG | ✅ Ready | `public/icon/128.png` (also `16.png`, `32.png`, `48.png` verified) |
-| Screenshot 1 [REQUIRED] | 1280×800 or 640×400 | 🟡 Needs capture | Selection toolbar (`翻译 \| 解释 \| 问翻翻`) + Side Panel quote Q&A |
-| Screenshot 2 [RECOMMENDED] | 1280×800 or 640×400 | 🟡 Needs capture | Full-page bilingual translation + Hover paragraph translation |
-| Screenshot 3 [RECOMMENDED] | 1280×800 or 640×400 | 🟡 Needs capture | Grounded article/PDF summary with clickable footnote citation highlight |
-| Screenshot 4 | 1280×800 or 640×400 | 🟡 Needs capture | YouTube/Bilibili bilingual draggable video subtitles & style popover |
-| Screenshot 5 | 1280×800 or 640×400 | 🟡 Needs capture | Side Panel Agent mode with step progress & safety confirmation card |
-| Small Promo Tile [RECOMMENDED] | 440×280 | ⬜ Not created | |
-| Marquee Promo Tile | 1400×560 | ⬜ Not created | |
+| Screenshot 1 [REQUIRED] | 1280×800 PNG/JPG | ✅ Ready | `dist/store-assets/screenshot-1-selection-toolbar-1280x800.png` (`.jpg`) |
+| Screenshot 2 [RECOMMENDED] | 1280×800 PNG/JPG | ✅ Ready | `dist/store-assets/screenshot-2-bilingual-translation-1280x800.png` (`.jpg`) |
+| Screenshot 3 [RECOMMENDED] | 1280×800 PNG/JPG | ✅ Ready | `dist/store-assets/screenshot-3-grounded-summary-1280x800.png` (`.jpg`) |
+| Screenshot 4 | 1280×800 PNG/JPG | ✅ Ready | `dist/store-assets/screenshot-4-video-subtitles-1280x800.png` (`.jpg`) |
+| Screenshot 5 | 1280×800 PNG/JPG | ✅ Ready | `dist/store-assets/screenshot-5-browser-agent-byok-1280x800.png` (`.jpg`) |
+| Small Promo Tile [RECOMMENDED] | 440×280 PNG/JPG | ✅ Ready | `dist/store-assets/small-promo-440x280.png` (`.jpg`) |
+| Marquee Promo Tile | 1400×560 PNG/JPG | ✅ Ready | `dist/store-assets/marquee-promo-1400x560.png` (`.jpg`) |
 
 ---
 

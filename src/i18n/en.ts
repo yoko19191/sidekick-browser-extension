@@ -30,6 +30,7 @@ export const en: Catalog = {
   // ---- Onboarding ----
   "ob.badBaseUrl": "Invalid Base URL format",
   "ob.baseUrlLabel": "Base URL (OpenAI Compatible)",
+  "ob.baseUrlLabelAnthropic": "Base URL (Anthropic Compatible)",
   "ob.fetchModels": "Fetch model list",
   "ob.finish": "Get Started",
   "ob.getKey": "Get API Key",
@@ -181,7 +182,10 @@ export const en: Catalog = {
   "err.unknown": "Unknown error",
   "err.unparsable": "Unable to parse model response",
   // ---- Provider Presets ----
+  "preset.antigravity": "Google Antigravity",
   "preset.custom": "Custom (OpenAI Compatible)",
+  "preset.customAnthropic": "Custom (Anthropic Compatible)",
+  "preset.customAnthropicHint": "Enter any Anthropic-compatible Base URL",
   "preset.customHint": "Enter any OpenAI-compatible Base URL",
   "preset.githubCopilot": "GitHub Copilot",
   "preset.groq": "Groq",
@@ -283,6 +287,7 @@ export const en: Catalog = {
   "opt.notSet": "Not set",
   "opt.notSettingsFile": "Not a valid Sidekick settings file",
   "opt.openPanel": "Toggle side panel",
+  "opt.customProviders": "Custom",
   "opt.openaiCompatible": "OpenAI Compatible",
   "opt.otherProtocols": "Other Protocols",
   "opt.pageTitle": "Sidekick · Settings",

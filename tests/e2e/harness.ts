@@ -1,14 +1,25 @@
 import { chromium, type BrowserContext, type Page } from "@playwright/test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const EXT_DIR = resolve(process.env.SIDEKICK_EXT_DIR ?? ".output-e2e/chrome-mv3");
 
+function resolveChromiumExecutable(): string | undefined {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  const fallback = join(
+    homedir(),
+    "Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+  );
+  if (!existsSync(chromium.executablePath()) && existsSync(fallback)) return fallback;
+  return undefined;
+}
+
 export async function launch(opts: { colorScheme?: "light" | "dark" } = {}): Promise<{ context: BrowserContext; extId: string }> {
   const userDataDir = mkdtempSync(join(tmpdir(), "pp-e2e-"));
+  const executablePath = resolveChromiumExecutable();
   const context = await chromium.launchPersistentContext(userDataDir, {
-    channel: "chromium", // full Chromium (new headless) — supports extensions
+    ...(executablePath ? { executablePath } : { channel: "chromium" }), // full Chromium (new headless) — supports extensions
     headless: process.env.HEADED !== "1",
     args: [`--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`, "--no-first-run", "--disable-gpu", "--lang=zh-CN"],
     locale: "zh-CN",

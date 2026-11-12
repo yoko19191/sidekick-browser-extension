@@ -12,6 +12,7 @@
 | `activeTab` | 用户点击工具栏图标、右键菜单或快捷键时，临时获得**当前标签页**的访问权，用来提取正文和注入翻译脚本 | 不授权任何网站就无法读取页面 |
 | `scripting` | 按需注入内容脚本（`chrome.scripting.executeScript`），而不是在所有网站常驻 | 只能在 manifest 里对所有网站常驻注入，权限更大 |
 | `contextMenus` | 右键菜单：翻译此页 / 翻译选中文字 / 在侧栏总结此页 | 少一个入口 |
+| `declarativeNetRequestWithHostAccess` | 在用户已授权的 API 域名（如 `*.googleapis.com` Antigravity 接口）上按需设置 `User-Agent` 请求头（浏览器 `fetch()` 默认禁止脚本直接覆盖 `User-Agent`） | Antigravity 等校验客户端 `User-Agent` 的渠道会返回 403 |
 
 ## 可选（optional，运行时由用户点击后申请）
 

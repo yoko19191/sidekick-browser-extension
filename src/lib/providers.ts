@@ -1,7 +1,25 @@
 import type { ModelRef, ProviderConfig, ProviderKind } from "./types";
 import { tr } from "@/src/i18n";
 
-export type OAuthProviderId = "chatgpt" | "openrouter" | "github-copilot" | "kimi-coding" | "xai" | "anthropic" | "meta";
+export type OAuthProviderId = "chatgpt" | "antigravity" | "openrouter" | "github-copilot" | "kimi-coding" | "xai" | "anthropic" | "meta";
+
+export const ANTIGRAVITY_MODELS = [
+  "gemini-3.8-flash-high",
+  "gemini-3.8-flash-medium",
+  "gemini-3.8-flash-low",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "claude-sonnet-5-5-high",
+  "claude-sonnet-5-5-medium",
+  "claude-sonnet-5-5-low",
+  "claude-opus-5-5-high",
+  "claude-opus-5-5-medium",
+  "claude-opus-5-5-low",
+  "gpt-oss-120b-medium",
+];
 
 export interface ProviderPreset {
   id: string;
@@ -17,6 +35,7 @@ export interface ProviderPreset {
 
 export const PRESETS: ProviderPreset[] = [
   { id: "openai", name: tr("preset.openai"), kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-5.3-codex-spark", "gpt-5.5"], keyUrl: "https://platform.openai.com/api-keys", oauth: "chatgpt" },
+  { id: "antigravity", name: tr("preset.antigravity"), kind: "gemini", baseUrl: "https://daily-cloudcode-pa.sandbox.googleapis.com", models: [...ANTIGRAVITY_MODELS], oauth: "antigravity" },
   { id: "anthropic", name: "Anthropic", kind: "anthropic", baseUrl: "https://api.anthropic.com", models: ["claude-sonnet-4-5", "claude-haiku-4-5"], keyUrl: "https://console.anthropic.com/settings/keys", oauth: "anthropic" },
   { id: "github-copilot", name: tr("preset.githubCopilot"), kind: "openai-compatible", baseUrl: "https://api.individual.githubcopilot.com", models: ["gpt-4.1", "claude-sonnet-4", "gpt-4o", "o3-mini"], oauth: "github-copilot" },
   { id: "openrouter", name: "OpenRouter", kind: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", models: ["openai/gpt-4o-mini", "deepseek/deepseek-chat"], keyUrl: "https://openrouter.ai/keys", oauth: "openrouter" },
@@ -34,6 +53,7 @@ export const PRESETS: ProviderPreset[] = [
   { id: "mistral", name: tr("preset.mistral"), kind: "openai-compatible", baseUrl: "https://api.mistral.ai/v1", models: ["mistral-small-latest", "mistral-large-latest"], keyUrl: "https://console.mistral.ai/api-keys" },
   { id: "ollama", name: tr("preset.ollama"), kind: "openai-compatible", baseUrl: "http://localhost:11434/v1", models: ["qwen2.5:7b"], keyOptional: true, hint: tr("preset.ollamaHint") },
   { id: "custom", name: tr("preset.custom"), kind: "openai-compatible", baseUrl: "", models: [], hint: tr("preset.customHint") },
+  { id: "custom-anthropic", name: tr("preset.customAnthropic"), kind: "anthropic", baseUrl: "", models: [], hint: tr("preset.customAnthropicHint") },
 ];
 
 export const PROVIDERS_KEY = "providers";
@@ -58,19 +78,41 @@ export function newProviderFromPreset(p: ProviderPreset, now = Date.now()): Prov
 /** Show only a short prefix and the last 4 chars: "sk-…a1b2". Never render a full key in the UI. */
 export function maskKey(key: string | undefined | null): string {
   if (!key) return "";
-  const k = key.trim();
+  let k = key.trim();
+  if (k.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(k) as { token?: string };
+      if (typeof parsed?.token === "string" && parsed.token.trim()) k = parsed.token.trim();
+    } catch {
+      /* ignore */
+    }
+  }
   if (k.length <= 8) return "•".repeat(k.length);
-  const prefix = /^[a-z]{2,4}-/i.exec(k)?.[0] ?? "";
+  const prefix = /^(?:[a-z]{2,4}-|ya29\.)/i.exec(k)?.[0] ?? "";
   return `${prefix}••••${k.slice(-4)}`;
 }
 
 /** Remove any occurrence of the given secrets (and common key shapes) from text such as provider error messages. */
 export function redactSecrets(text: string, secrets: (string | undefined)[] = []): string {
   let out = text;
-  for (const s of secrets) if (s && s.length >= 6) out = out.split(s).join("[redacted]");
+  for (const s of secrets) {
+    if (!s || s.length < 6) continue;
+    out = out.split(s).join("[redacted]");
+    if (s.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(s) as { token?: string };
+        if (typeof parsed?.token === "string" && parsed.token.length >= 6) {
+          out = out.split(parsed.token).join("[redacted]");
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   return out
     .replace(/\b(sk|ak|pk)-[A-Za-z0-9_\-]{12,}/g, "[redacted]")
     .replace(/AIza[0-9A-Za-z_\-]{20,}/g, "[redacted]")
+    .replace(/ya29\.[0-9A-Za-z_\-.]{16,}/g, "[redacted]")
     .replace(/([?&]key=)[^&\s"']+/g, "$1[redacted]")
     .replace(/(Bearer\s+)[A-Za-z0-9._\-]{8,}/gi, "$1[redacted]");
 }
@@ -123,11 +165,30 @@ export async function saveProviders(list: ProviderConfig[]) {
 export async function getKey(providerId: string): Promise<string | undefined> {
   const k = secretKey(providerId);
   const r = await chrome.storage.local.get(k);
-  return typeof r[k] === "string" && r[k] ? (r[k] as string) : undefined;
+  const v = typeof r[k] === "string" && r[k] ? (r[k] as string).trim() : undefined;
+  if (!v) return undefined;
+  if (v.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(v) as { token?: string };
+      if (typeof parsed?.token === "string" && parsed.token.trim()) return parsed.token.trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  return v;
 }
 export async function setKey(providerId: string, key: string) {
   const k = secretKey(providerId);
-  if (key.trim()) await chrome.storage.local.set({ [k]: key.trim() });
+  let v = key.trim();
+  if (v.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(v) as { token?: string };
+      if (typeof parsed?.token === "string" && parsed.token.trim()) v = parsed.token.trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (v) await chrome.storage.local.set({ [k]: v });
   else await chrome.storage.local.remove(k);
 }
 export async function deleteProvider(providerId: string) {
@@ -145,6 +206,7 @@ export async function keyStatus(): Promise<Record<string, string>> {
 /** Turn provider / network errors into a readable reason (spec 3.5: key wrong / no balance / network). */
 export function friendlyError(raw: string): string {
   const m = raw || "";
+  if (/Cloud Code Assist API error/i.test(m)) return m.slice(0, 240);
   if (/\b(401|403)\b|invalid[_ ]api[_ ]key|incorrect api key|unauthori[sz]ed|authentication/i.test(m)) return tr("err.401");
   if (/\b402\b|insufficient|balance|quota|billing|余额/i.test(m)) return tr("err.402");
   if (/\b429\b|rate limit|too many requests/i.test(m)) return tr("err.429");
